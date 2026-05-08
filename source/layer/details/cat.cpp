@@ -1,8 +1,11 @@
 #include "cat.hpp"
 #include "layer/abstract/layer_factory.hpp"
 namespace net_infer {
+
 CatLayer::CatLayer(int32_t dim) : NonParamLayer("cat"), dim_(dim) {}
 
+/// Forward pass: concatenates groups of input tensors along the channel dimension.
+/// Inputs are divided into packets where each packet contributes to one output tensor.
 StatusCode CatLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                              std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode status_code = Check(inputs, outputs);
@@ -11,11 +14,13 @@ StatusCode CatLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& 
   }
 
   const uint32_t output_size = outputs.size();
+  // Number of input tensors per output tensor.
   const uint32_t packet_size = inputs.size() / output_size;
 #pragma omp parallel for num_threads(outputs.size())
   for (uint32_t i = 0; i < outputs.size(); ++i) {
     uint32_t copy_channel_offset = 0;
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
+    // Gather inputs spaced by output_size to form one concatenated output.
     for (uint32_t j = i; j < inputs.size(); j += output_size) {
       const std::shared_ptr<Tensor<float>>& input = inputs.at(j);
       const uint32_t in_rows = input->rows();
@@ -32,6 +37,7 @@ StatusCode CatLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& 
              "has an incorrectly sized tensor "
           << i << " th";
 
+      // Copy input data into the appropriate channel offset of the output tensor.
       const uint32_t plane_size = in_rows * in_cols;
       memcpy(output->raw_ptr(copy_channel_offset * plane_size), input->raw_ptr(),
              sizeof(float) * plane_size * in_channels);
@@ -41,6 +47,7 @@ StatusCode CatLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& 
   return StatusCode::kSuccess;
 }
 
+/// Parses the "dim" parameter from the runtime operator to create a CatLayer.
 StatusCode CatLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                     std::shared_ptr<Layer<float>>& cat_layer) {
   if (!op) {
@@ -69,6 +76,8 @@ StatusCode CatLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
   return StatusCode::kSuccess;
 }
 
+/// Validates that inputs are non-empty, outputs are non-empty, and that the concat dimension is supported.
+/// Currently only channel-wise concatenation (dim = 1 or -3) is supported.
 StatusCode CatLayer::Check(const std::vector<sftensor>& inputs,
                            const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {

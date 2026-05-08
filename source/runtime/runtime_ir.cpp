@@ -9,6 +9,7 @@
 #include "utils/time/time_logging.hpp"
 
 namespace net_infer {
+
 RuntimeGraph::RuntimeGraph(std::string param_path, std::string bin_path)
     : param_path_(std::move(param_path)), bin_path_(std::move(bin_path)) {}
 
@@ -20,8 +21,22 @@ const std::string& RuntimeGraph::param_path() const { return this->param_path_; 
 
 const std::string& RuntimeGraph::bin_path() const { return this->bin_path_; }
 
+/**
+ * @brief 判断是否为量化算子（当前未支持）
+ * @return 固定返回 false
+ */
 static bool IsQuantizeOp(const pnnx::Operator* op) { return false; }
 
+/**
+ * @brief 从 pnnx 模型文件加载并初始化运行时算子
+ * @return 加载成功返回 true，否则返回 false
+ *
+ * 加载流程：
+ * 1. 使用 pnnx::Graph 加载 .param 和 .bin 文件
+ * 2. 遍历所有算子，跳过量化算子
+ * 3. 对每个算子提取：名称、类型、输入、输出、属性（权重）、参数
+ * 4. 将所有运行时算子存入 operators_ 列表
+ */
 bool RuntimeGraph::Init() {
   if (this->bin_path_.empty() || this->param_path_.empty()) {
     LOG(ERROR) << "The bin path or param path is empty";
@@ -76,6 +91,16 @@ bool RuntimeGraph::Init() {
   return true;
 }
 
+/**
+ * @brief 构建计算图，完成拓扑排序和内存初始化
+ *
+ * 构建流程：
+ * 1. 若尚未 Init，先调用 Init()
+ * 2. 构建算子间的连接关系（CreateNodeRelation）
+ * 3. 反向拓扑排序（ReverseTopoSort），确定执行顺序
+ * 4. 初始化所有算子的输入/输出数据空间
+ * 5. 释放 pnnx::Graph 对象（不再需要）
+ */
 void RuntimeGraph::Build() {
   if (graph_state_ == GraphState::Complete) {
     LOG(INFO) << "Model has been built already!";
@@ -108,6 +133,14 @@ void RuntimeGraph::Build() {
   }
 }
 
+/**
+ * @brief 执行单个层的前向推理
+ * @param layer 待执行的层对象
+ * @param op_name 算子名称（用于计时日志）
+ * @param op_type 算子类型（用于计时日志）
+ * @param is_debug 若为 true，则记录该层的执行耗时
+ * @return 执行状态码
+ */
 template <typename T>
 StatusCode ExecuteLayer(const std::shared_ptr<Layer<T>>& layer, const std::string& op_name,
                         const std::string& op_type, bool is_debug) {
@@ -122,6 +155,18 @@ StatusCode ExecuteLayer(const std::shared_ptr<Layer<T>>& layer, const std::strin
   return status;
 }
 
+/**
+ * @brief 执行整个计算图的前向推理
+ * @param debug 若为 true，则输出各层执行时间的汇总日志
+ *
+ * 推理流程：
+ * 1. 检查图是否已构建完成
+ * 2. 按拓扑顺序遍历所有算子
+ * 3. 跳过输入/输出占位算子（pnnx.Input / pnnx.Output）
+ * 4. 对每个算子调用 ExecuteLayer 进行前向计算
+ * 5. 将当前层的输出传播到后继算子的输入（PropagateLayerOutputs）
+ * 6. 检查所有算子是否都已执行
+ */
 void RuntimeGraph::Forward(bool debug) {
   // 检查当前的执行图是否已经初始化完毕
   if (graph_state_ < GraphState::Complete) {
@@ -137,6 +182,7 @@ void RuntimeGraph::Forward(bool debug) {
     current_op->has_forward = false;
     CHECK_GT(current_op->start_time, 0);
 
+    // 输入/输出占位算子不需要执行层计算
     if (is_input_op(current_op->name) || is_output_op(current_op->name)) {
       current_op->has_forward = true;
       continue;
@@ -152,6 +198,7 @@ void RuntimeGraph::Forward(bool debug) {
         << " layer forward failed, error code: " << int32_t(status);
 
     current_op->has_forward = true;
+    // 将当前层的输出张量传播给所有后继算子
     PropagateLayerOutputs(current_op, current_op->output_operands->datas);
   }
 
@@ -159,11 +206,17 @@ void RuntimeGraph::Forward(bool debug) {
     utils::LayerTimeLogging::SummaryLogging();
   }
 
+  // 断言所有算子都已完成前向传播
   for (const auto& op : operators_) {
     LOG_IF(FATAL, !op->has_forward) << "The operator: " << op->name << " has not been forward yet!";
   }
 }
 
+/**
+ * @brief 根据运行时算子创建对应的层对象
+ * @param op 运行时算子
+ * @return 创建的层对象
+ */
 template <typename T>
 std::shared_ptr<Layer<T>> RuntimeGraph::CreateLayer(
     const std::shared_ptr<RuntimeOperatorBase<T>>& op) {
@@ -173,6 +226,13 @@ std::shared_ptr<Layer<T>> RuntimeGraph::CreateLayer(
   return layer;
 }
 
+/**
+ * @brief 将 pnnx 的输入操作数转换为运行时输入操作数
+ * @param inputs pnnx 输入操作数列表
+ * @param runtime_operator 目标运行时算子
+ *
+ * 提取每个输入的形状、生产者名称、数据类型，并存入 runtime_operator 的 input_operands。
+ */
 template <typename T>
 void RuntimeGraph::InitGraphOperatorsInput(
     const std::vector<pnnx::Operand*>& inputs,
@@ -216,6 +276,11 @@ void RuntimeGraph::InitGraphOperatorsInput(
   }
 }
 
+/**
+ * @brief 记录算子的输出操作数对应的消费者名称
+ * @param outputs pnnx 输出操作数列表
+ * @param runtime_operator 目标运行时算子
+ */
 template <typename T>
 void RuntimeGraph::InitGraphOperatorsOutput(
     const std::vector<pnnx::Operand*>& outputs,
@@ -235,6 +300,13 @@ void RuntimeGraph::InitGraphOperatorsOutput(
   }
 }
 
+/**
+ * @brief 将 pnnx 的参数转换为运行时参数
+ * @param params pnnx 参数映射表
+ * @param runtime_operator 目标运行时算子
+ *
+ * 支持的参数类型：bool、int、float、string、int_array、float_array、string_array
+ */
 template <typename T>
 void RuntimeGraph::InitGraphParams(
     const std::map<std::string, pnnx::Parameter>& params,
@@ -306,6 +378,13 @@ void RuntimeGraph::InitGraphParams(
   }
 }
 
+/**
+ * @brief 将 pnnx 的属性（权重）转换为运行时属性
+ * @param attrs pnnx 属性映射表
+ * @param runtime_operator 目标运行时算子
+ *
+ * 目前仅支持 float32 类型的属性。
+ */
 template <typename T>
 void RuntimeGraph::InitGraphAttrs(const std::map<std::string, pnnx::Attribute>& attrs,
                                   const std::shared_ptr<RuntimeOperatorBase<T>>& runtime_operator) {
@@ -328,6 +407,14 @@ void RuntimeGraph::InitGraphAttrs(const std::map<std::string, pnnx::Attribute>& 
   }
 }
 
+/**
+ * @brief 将当前算子的输出传播到所有后继算子的输入
+ * @param current_op 当前算子
+ * @param layer_output_datas 当前算子的输出张量列表
+ *
+ * 遍历 current_op 的所有后继算子，找到对应于 current_op 的输入操作数，
+ * 并将输出张量赋值给该输入操作数的 datas。
+ */
 template <typename T>
 void RuntimeGraph::PropagateLayerOutputs(
     const std::shared_ptr<RuntimeOperatorBase<T>>& current_op,
@@ -352,6 +439,15 @@ void RuntimeGraph::PropagateLayerOutputs(
   }
 }
 
+/**
+ * @brief 对计算图进行反向拓扑排序，确定算子执行顺序
+ *
+ * 流程：
+ * 1. 从输出节点出发，递归 DFS 标记所有节点的 start_time（后序遍历的逆序）
+ * 2. 按 start_time 降序排列算子，得到正向执行顺序
+ * 3. 计算每个算子的 end_time（即其最后一个后继的 start_time）
+ *    - end_time 用于输出内存复用的生命周期管理
+ */
 void RuntimeGraph::ReverseTopoSort() {
   // 构建拓扑顺序
   for (const auto& op : operators_) {
@@ -373,6 +469,7 @@ void RuntimeGraph::ReverseTopoSort() {
     forward_index += 1;
   }
 
+  // 计算每个算子的 end_time（其输出数据被最后使用的时刻）
   for (const auto& op : operators_) {
     const auto& next_ops = op->output_operators;
     int32_t last_forward_index = -1;
@@ -391,6 +488,14 @@ void RuntimeGraph::ReverseTopoSort() {
   }
 }
 
+/**
+ * @brief 反向拓扑排序的递归内部实现（从输出端向输入端 DFS）
+ * @param root_op 当前递归的根算子
+ * @param current_forward_idx 当前分配的序号（引用传递，递归递增）
+ *
+ * 采用后序遍历的方式：先递归处理所有后继节点，再为当前节点分配 start_time。
+ * 这样可以确保输入节点获得较大的序号，输出节点获得较小的序号。
+ */
 template <typename T>
 void RuntimeGraph::ReverseTopoSortInternal(const std::shared_ptr<RuntimeOperatorBase<T>>& root_op,
                                            int32_t& current_forward_idx) {
@@ -398,6 +503,7 @@ void RuntimeGraph::ReverseTopoSortInternal(const std::shared_ptr<RuntimeOperator
     LOG(INFO) << "Current operator is nullptr";
     return;
   }
+  // 标记输入/输出节点
   if (root_op->input_operands.empty() && !root_op->has_forward) {
     this->input_ops_.push_back(root_op);
   }
@@ -407,19 +513,30 @@ void RuntimeGraph::ReverseTopoSortInternal(const std::shared_ptr<RuntimeOperator
 
   root_op->has_forward = true;
   const auto& next_ops = root_op->output_operators;
+  // 先递归访问所有后继节点
   for (const auto& [_, op] : next_ops) {
     if (op != nullptr && !op->has_forward) {
       this->ReverseTopoSortInternal(op, current_forward_idx);
     }
   }
 
+  // 断言所有后继节点都已被访问
   for (const auto& [_, op] : next_ops) {
     CHECK_EQ(op->has_forward, true);
   }
+  // 为当前节点分配序号（后序：当前节点序号大于所有后继）
   root_op->start_time = current_forward_idx;
   current_forward_idx += 1;
 }
 
+/**
+ * @brief 构建算子之间的连接关系，并为每个算子创建对应的 Layer 对象
+ *
+ * 流程：
+ * 1. 遍历每个算子的 output_names，在 operators_ 中查找对应的后继算子，建立映射
+ * 2. 对于非输入/输出占位算子，通过 LayerRegisterer 创建对应的 Layer 对象
+ * 3. 将 Layer 与 RuntimeOperator 双向绑定
+ */
 void RuntimeGraph::CreateNodeRelation() {
   // 构建图关系
   for (const auto& current_op : this->operators_) {
@@ -447,6 +564,13 @@ void RuntimeGraph::CreateNodeRelation() {
 
 RuntimeGraph::GraphState RuntimeGraph::graph_state() const { return this->graph_state_; }
 
+/**
+ * @brief 设置指定输入算子的输入数据
+ * @param input_name 输入算子的名称
+ * @param inputs 输入张量列表
+ *
+ * 内部通过 PropagateLayerOutputs 将输入数据传播给后继算子。
+ */
 void RuntimeGraph::set_inputs(const std::string& input_name, const std::vector<sftensor>& inputs) {
   CHECK(this->graph_state_ == GraphState::Complete);
   std::shared_ptr<RuntimeOperator> input_op;
@@ -460,6 +584,13 @@ void RuntimeGraph::set_inputs(const std::string& input_name, const std::vector<s
   PropagateLayerOutputs(input_op, inputs);
 }
 
+/**
+ * @brief 获取指定输出算子的输出数据
+ * @param output_name 输出算子的名称
+ * @return 输出张量列表
+ *
+ * 输出算子的数据存储在其 input_operands_seq 中（因为输出算子是 pnnx.Output 占位节点）。
+ */
 std::vector<sftensor> RuntimeGraph::get_outputs(const std::string& output_name) const {
   CHECK(this->graph_state_ == GraphState::Complete);
   std::shared_ptr<RuntimeOperator> output_op;

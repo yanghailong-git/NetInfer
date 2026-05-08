@@ -2,6 +2,8 @@
 #include "simd.hpp"
 namespace net_infer {
 namespace activation {
+
+/// Converts the given ActivationType enum to a human-readable string name.
 std::string ActivationTypeToString(ActivationType type) {
   std::string activate_type;
   switch (type) {
@@ -37,6 +39,7 @@ std::string ActivationTypeToString(ActivationType type) {
   return activate_type;
 }
 
+/// Validates that inputs and outputs are non-empty and have matching batch sizes.
 StatusCode ActivationLayer::Check(const std::vector<sftensor>& inputs,
                                   const std::vector<sftensor>& outputs) {
   const std::string& activation_type = ActivationTypeToString(act_type_);
@@ -58,6 +61,8 @@ StatusCode ActivationLayer::Check(const std::vector<sftensor>& inputs,
   return StatusCode::kSuccess;
 }
 
+/// Performs the forward pass by applying the selected activation function to each tensor in the batch.
+/// If an output tensor is null or empty, it is allocated with the same shape as the corresponding input.
 StatusCode ActivationLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                     std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode check_status = Check(inputs, outputs);
@@ -67,6 +72,7 @@ StatusCode ActivationLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
 
   const uint32_t batch_size = inputs.size();
   const std::string& act_type_str = ActivationTypeToString(act_type_);
+  // Obtain the SIMD-optimized activation function based on the configured type.
   ActivationFunc activation_function = ApplySSEActivation(act_type_);
 #pragma omp parallel for num_threads(batch_size)
   for (uint32_t i = 0; i < batch_size; ++i) {

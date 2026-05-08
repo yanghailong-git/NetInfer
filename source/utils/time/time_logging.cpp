@@ -4,6 +4,13 @@
 
 namespace net_infer {
 namespace utils {
+
+/**
+ * @brief 获取 LayerTimeStatesCollector 的单例实例
+ * @return 指向 LayerTimeStatesCollector 的共享指针
+ *
+ * 使用双重检查锁定（DCL）模式，通过 std::lock_guard 保证线程安全。
+ */
 PtrLayerTimeStatesCollector LayerTimeStatesSingleton::SingletonInstance() {
   std::lock_guard<std::mutex> lock_(mutex_);
   if (time_states_collector_ == nullptr) {
@@ -12,6 +19,12 @@ PtrLayerTimeStatesCollector LayerTimeStatesSingleton::SingletonInstance() {
   return time_states_collector_;
 }
 
+/**
+ * @brief 初始化/重置时间统计收集器
+ *
+ * 若已有旧的收集器实例，先将其释放，再重新创建新的单例实例。
+ * 通常在每次 Forward(true) 调用前执行，以清除上一次的计时数据。
+ */
 void LayerTimeStatesSingleton::LayerTimeStatesCollectorInit() {
   if (time_states_collector_ != nullptr) {
     std::lock_guard<std::mutex> lock_(mutex_);
@@ -25,6 +38,13 @@ std::mutex LayerTimeStatesSingleton::mutex_;
 
 PtrLayerTimeStatesCollector LayerTimeStatesSingleton::time_states_collector_;
 
+/**
+ * @brief 构造函数，开始记录当前层的执行时间
+ * @param layer_name 层名称
+ * @param layer_type 层类型
+ *
+ * 在单例收集器中插入或初始化该层的计时状态，并记录起始时间点。
+ */
 LayerTimeLogging::LayerTimeLogging(std::string layer_name, std::string layer_type)
     : layer_name_(std::move(layer_name)),
       layer_type_(std::move(layer_type)),
@@ -34,6 +54,14 @@ LayerTimeLogging::LayerTimeLogging(std::string layer_name, std::string layer_typ
       {layer_name_, std::make_shared<LayerTimeState>(0l, layer_name_, layer_type_)});
 }
 
+/**
+ * @brief 析构函数，结束记录当前层的执行时间并累加耗时
+ *
+ * 当 LayerTimeLogging 对象离开作用域时自动调用：
+ * 1. 计算从构造到析构的时间差（毫秒）
+ * 2. 将耗时累加到对应层的 LayerTimeState::duration_time_ 中
+ * 3. 使用 mutex 保证多线程环境下的累加安全
+ */
 LayerTimeLogging::~LayerTimeLogging() {
   auto layer_time_states = LayerTimeStatesSingleton::SingletonInstance();
   const auto layer_state_iter = layer_time_states->find(layer_name_);
@@ -51,6 +79,13 @@ LayerTimeLogging::~LayerTimeLogging() {
   }
 }
 
+/**
+ * @brief 汇总并打印所有层的耗时统计
+ *
+ * 遍历 LayerTimeStatesCollector 中所有层的计时状态，
+ * 打印每个层的名称、类型和累计耗时，最后输出总耗时。
+ * 仅打印 duration_time_ 不为 0 的层（避免打印未执行的层）。
+ */
 void LayerTimeLogging::SummaryLogging() {
   auto layer_time_states = LayerTimeStatesSingleton::SingletonInstance();
   CHECK(layer_time_states != nullptr);

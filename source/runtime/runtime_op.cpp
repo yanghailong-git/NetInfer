@@ -2,6 +2,14 @@
 #include "data/tensor_util.hpp"
 
 namespace net_infer {
+
+/**
+ * @brief 初始化所有算子的输入数据空间
+ * @param operators 运行时算子列表
+ *
+ * 遍历每个算子的 input_operands，根据 shapes 中的 batch 维度，
+ * 为每个输入操作数分配对应 batch 数量的张量占位（空 shared_ptr）。
+ */
 void RuntimeOperatorUtils<float>::InitOperatorInput(
     const std::vector<std::shared_ptr<RuntimeOperator>>& operators) {
   if (operators.empty()) {
@@ -42,6 +50,15 @@ void RuntimeOperatorUtils<float>::InitOperatorInput(
   }
 }
 
+/**
+ * @brief 根据操作数的形状创建对应的输出张量
+ * @param operand_shapes 操作数形状，支持 2/3/4 维
+ * @return 创建好的张量
+ *
+ * - 4 维：[batch, channel, height, width]
+ * - 3 维：[batch, height, width]
+ * - 2 维：[batch, features]
+ */
 static sftensor CreateTensor(const std::vector<int32_t>& operand_shapes) {
   switch (operand_shapes.size()) {
     case 4:
@@ -56,6 +73,11 @@ static sftensor CreateTensor(const std::vector<int32_t>& operand_shapes) {
   }
 }
 
+/**
+ * @brief 检查输出张量形状是否与目标形状一致，若不一致则进行 Reshape
+ * @param output_tensor 待检查/调整的张量
+ * @param operand_shapes 目标形状
+ */
 static void CheckAndReshapeTensor(sftensor& output_tensor,
                                   const std::vector<int32_t>& operand_shapes) {
   switch (operand_shapes.size()) {
@@ -75,6 +97,16 @@ static void CheckAndReshapeTensor(sftensor& output_tensor,
   }
 }
 
+/**
+ * @brief 初始化所有算子的输出数据空间
+ * @param pnnx_operators pnnx 原始算子列表
+ * @param operators 运行时算子列表
+ *
+ * 核心逻辑：
+ * 1. 首先尝试复用已执行完毕的前序算子的输出内存（通过 start_time/end_time 判断生命周期）
+ * 2. 若无法复用，则为每个 batch 创建新的张量
+ * 3. 目前仅支持单输出算子
+ */
 void RuntimeOperatorUtils<float>::InitOperatorOutput(
     const std::vector<pnnx::Operator*>& pnnx_operators,
     const std::vector<std::shared_ptr<RuntimeOperator>>& operators) {
@@ -90,6 +122,7 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
     pnnx::Operand* operand = operands.front();
     CHECK(operand != nullptr && !operand->shape.empty()) << "Operand output is null or empty!";
     std::vector<int32_t> operand_shapes;
+    // 过滤掉非法维度（如 -1 或 0）
     std::copy_if(operand->shape.begin(), operand->shape.end(), std::back_inserter(operand_shapes),
                  [](int32_t dim) { return dim > 0; });
 
@@ -103,7 +136,9 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
 
     const int32_t batch = operand_shapes[0];
     CHECK_EQ(operand->type, 1) << "The type of pnnx operand is not float32";
+
     if (!output_tensors) {
+      // 尝试复用前序算子的输出内存
       bool has_found = false;
       for (uint32_t j = 0; j < i; ++j) {
         if (has_found) {
@@ -119,6 +154,7 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
           prev_runtime_op->occur_end_time = -1;
         }
 
+        // 若当前算子的执行时间在前序算子生命周期结束之后，且元素总数一致，则可复用内存
         if (runtime_op->start_time > prev_runtime_op->end_time) {
           if (prev_runtime_op->output_operands->size() == operand_size) {
             has_found = true;
@@ -129,6 +165,7 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
             const auto& prev_runtime_op_tensors = prev_output_operand->datas;
             for (uint32_t b = 0; b < batch; ++b) {
               sftensor prev_output_tensor = prev_runtime_op_tensors.at(b);
+              // 复用前序算子的内存指针，创建共享内存的新张量
               sftensor output_tensor = std::make_shared<ftensor>(prev_output_tensor->raw_ptr(),
                                                                  prev_output_tensor->shapes());
               CheckAndReshapeTensor(output_tensor, operand_shapes);
@@ -139,6 +176,7 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
         }
       }
 
+      // 未能复用内存，则新建输出张量
       if (!has_found) {
         std::vector<sftensor> output_operand_datas;
         for (uint32_t j = 0; j < batch; ++j) {
@@ -149,6 +187,7 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
                                              output_operand_datas, RuntimeDataType::kTypeFloat32);
       }
     } else {
+      // 输出已存在，仅检查 batch、类型、形状是否匹配，并调整形状
       CHECK(batch == output_tensors->datas.size());
       CHECK(output_tensors->type == RuntimeDataType::kTypeFloat32);
       CHECK(output_tensors->shapes == operand_shapes);

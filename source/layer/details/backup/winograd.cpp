@@ -1,8 +1,17 @@
 #include "winograd.hpp"
 #include <glog/logging.h>
 #include "tick.hpp"
+
 namespace net_infer {
 
+/**
+ * @brief 对 3x3 卷积核进行 Winograd G 变换
+ * @param g 输入的 3x3 卷积核矩阵
+ * @param transform_g 输出的 6x6 变换后矩阵
+ *
+ * 公式：transform_g = G * g * G^T
+ * 其中 G 是固定的 6x3 Winograd 变换矩阵。
+ */
 static void WinogradTransformG(const arma::fmat& g, arma::fmat& transform_g) {
   arma::fmat Gg(6, 3);
   for (int32_t i = 0; i < 3; ++i) {
@@ -36,10 +45,23 @@ static void WinogradTransformG(const arma::fmat& g, arma::fmat& transform_g) {
   }
 }
 
+/**
+ * @brief 执行 F(4x4, 3x3) Winograd 卷积的核心计算
+ * @param transform_g 经过 G 变换后的卷积核（6x6）
+ * @param in 输入 tile 的 6 列指针数组
+ * @param Y 输出的 4x4 结果（共 16 个元素）
+ *
+ * 计算流程：
+ * 1. B^T * d（输入变换）
+ * 2. 逐元素乘变换后的核（V = B^T * d ⊙ transform_g）
+ * 3. A^T * V（输出变换）
+ * 其中 B^T 和 A^T 是固定的 Winograd 变换矩阵。
+ */
 static void Winograd4x32(const arma::fmat& transform_g, float* in[6], float Y[16]) {
   CHECK_EQ(transform_g.empty(), false);
   CHECK(transform_g.n_cols == 6 && transform_g.n_rows == 6);
 
+  // 输入变换 B^T * d
   float BTd[6][6];
   for (int32_t i = 0; i < 6; ++i) {
     const float d0 = in[0][i];
@@ -57,6 +79,7 @@ static void Winograd4x32(const arma::fmat& transform_g, float* in[6], float Y[16
     BTd[5][i] = (d1 * 4) - d3 * 5 + d5;
   }
 
+  // 逐元素乘：V = BTd ⊙ transform_g
   float V[6][6];
   for (int32_t i = 0; i < 6; ++i) {
     const float BTd0 = BTd[i][0];
@@ -73,6 +96,7 @@ static void Winograd4x32(const arma::fmat& transform_g, float* in[6], float Y[16
     V[i][5] = ((BTd1 * 4) - (BTd3 * 4) - BTd3 + BTd5) * transform_g.at(5, i);
   }
 
+  // 输出变换 A^T * V（列方向）
   float ATM[4][6];
   for (int32_t i = 0; i < 6; ++i) {
     const float M0 = V[0][i];
@@ -88,6 +112,7 @@ static void Winograd4x32(const arma::fmat& transform_g, float* in[6], float Y[16
     ATM[3][i] = M1 - M2 + (M3 * 8) - (M4 * 8) + M5;
   }
 
+  // 输出变换 A^T * V（行方向），得到最终的 4x4 结果
   for (int32_t i = 0; i < 4; ++i) {
     const float ATM0 = ATM[i][0];
     const float ATM1 = ATM[i][1];
@@ -103,6 +128,19 @@ static void Winograd4x32(const arma::fmat& transform_g, float* in[6], float Y[16
   }
 }
 
+/**
+ * @brief 使用 Winograd F(4x4, 3x3) 算法进行 3x3 stride=1 卷积
+ * @param input 输入张量
+ * @param output 输出张量
+ * @param weights 权重张量列表
+ *
+ * 算法流程：
+ * 1. 计算输出尺寸和 tile 数量
+ * 2. 对输入进行必要的边界填充（padding）
+ * 3. 对每个输出通道和输入通道，计算卷积核的 Winograd G 变换
+ * 4. 将输入划分为 4x4 的 tile，逐 tile 执行 Winograd 计算
+ * 5. 将 4x4 的卷积结果累加到输出张量
+ */
 void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
                       std::shared_ptr<Tensor<float>>& output,
                       const std::vector<sftensor>& weights) {
@@ -126,6 +164,7 @@ void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
   CHECK(output != nullptr && !output->empty());
   CHECK(output->rows() == output_h && output->cols() == output_w);
 
+  // 计算 tile 数量：每个 tile 输出 4x4，需要 6x6 的输入区域
   const uint32_t tile_num_w =
       (int32_t(input_w) - 6) / 4 + ((int32_t(input_w) - 6) % 4 > 0 ? 1 : 0) + 1;
 
@@ -135,6 +174,7 @@ void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
   const uint32_t padded_in_w = 4 * tile_num_w + 2;
   const uint32_t padded_in_h = 4 * tile_num_h + 2;
 
+  // 若输入尺寸不足以覆盖所有 tile，则创建填充后的输入
   sftensor padded_input;
   if (padded_in_w != input_w && padded_in_h != input_h) {
     padded_input = std::make_shared<ftensor>(input_channels, padded_in_h, padded_in_w);
@@ -153,11 +193,13 @@ void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
     padded_input = input;
   }
 
+  // 逐输出通道、逐输入通道执行 Winograd 卷积
 #pragma omp parallel for
   for (uint32_t k = 0; k < kernel_count; ++k) {
     for (uint32_t input_c = 0; input_c < input_channels; ++input_c) {
       const auto& weight = weights.at(k);
       arma::fmat transform_g;
+      // 对当前卷积核进行 G 变换
       WinogradTransformG(weight->slice(input_c), transform_g);
       const arma::fmat& padded_input_channel = padded_input->slice(input_c);
 
@@ -167,6 +209,7 @@ void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
           uint32_t tile_x = tile_ind_x * 4;
           uint32_t tile_y = tile_ind_y * 4;
           float* in[6];
+          // 提取当前 tile 的 6 列输入数据
           for (int32_t i = 0; i < 6; i++) {
             float* padded_input_channel_colptr =
                 (float*)padded_input_channel.colptr(tile_x + i) + tile_y;
@@ -174,8 +217,10 @@ void Convolution3x3s1(const std::shared_ptr<Tensor<float>>& input,
           }
 
           float Y[16];
+          // 执行 Winograd 核心计算
           Winograd4x32(transform_g, in, Y);
           const arma::fmat& out_channel = output->slice(k);
+          // 将 4x4 的结果累加到输出张量对应位置
 #pragma omp simd
           for (int32_t i = 0; i < 4; ++i) {
             if (tile_x + i < out_channel.n_cols) {

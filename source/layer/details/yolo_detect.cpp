@@ -35,6 +35,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
   const uint32_t input_size = inputs.size();
   const uint32_t batch_size = outputs.size();
 
+  // 输入数量应为 batch_size * stages
   if (input_size / batch_size != stages_ || input_size % batch_size != 0) {
     LOG(ERROR) << "The input and output tensor array size of the yolo detect "
                   "layer do not match";
@@ -45,6 +46,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
       << "The yolo detect layer do not have appropriate number of convolution "
          "operations";
 
+  // 将输入按 stage 分组：每个 stage 包含 batch_size 个张量
   std::vector<std::vector<std::shared_ptr<Tensor<float>>>> batches(stages);
   for (uint32_t i = 0; i < input_size; ++i) {
     const uint32_t index = i / batch_size;
@@ -59,6 +61,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
     batches.at(index).push_back(input_data);
   }
 
+  // 逐 stage 进行 1x1 卷积推理
   std::vector<std::vector<sftensor>> stage_outputs(stages);
   for (uint32_t stage = 0; stage < stages; ++stage) {
     const std::vector<std::shared_ptr<Tensor<float>>>& stage_input = batches.at(stage);
@@ -80,6 +83,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
     stage_outputs.at(stage) = stage_output;
   }
 
+  // 逐 stage 解码检测结果并拼接
   std::vector<sftensor> stage_tensors;
   uint32_t concat_rows = 0;
   for (uint32_t stage = 0; stage < stages; ++stage) {
@@ -90,6 +94,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
       CHECK(stage_output.at(i)->rows() == nx && stage_output.at(i)->cols() == ny);
     }
 
+    // 创建该 stage 的拼接结果张量：[batch_size, stages*nx*ny, num_classes+5]
     std::shared_ptr<Tensor<float>> stages_tensor =
         TensorCreate<float>(batch_size, stages * nx * ny, uint32_t(num_classes_ + 5));
     stage_tensors.push_back(stages_tensor);
@@ -100,23 +105,28 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
       CHECK(input != nullptr && !input->empty());
       CHECK_EQ(input->rows(), nx);
       CHECK_EQ(input->cols(), ny);
+      // 将输入 reshape 为 [stages, classes_info, ny*nx]（行主序）
       input->Reshape({stages, uint32_t(classes_info), ny * nx}, true);
 
       CHECK_EQ(stages_tensor->channels(), batch_size);
       CHECK_EQ(stages_tensor->rows(), stages_ * nx * ny);
       CHECK_EQ(stages_tensor->cols(), classes_info);
 
+      // 对预测值应用 sigmoid 激活
       using namespace net_infer::activation;
       ApplySSEActivation(ActivationType::kActivationSigmoid)(input, input);
       const arma::fcube& input_data = input->data();
 
+      // 将当前 batch 的解码结果写入 stages_tensor 的第 b 个通道
       arma::fmat& x_stages = stages_tensor->slice(b);
       for (uint32_t na = 0; na < num_anchors_; ++na) {
         x_stages.submat(ny * nx * na, 0, ny * nx * (na + 1) - 1, classes_info - 1) =
             input_data.slice(na).t();
       }
 
+      // 解码中心坐标：xy = (sigmoid(pred_xy) * 2 + grid) * stride
       auto xy = x_stages.submat(0, 0, x_stages.n_rows - 1, 1);
+      // 解码宽高：wh = (sigmoid(pred_wh) * 2)^2 * anchor_grid
       auto wh = x_stages.submat(0, 2, x_stages.n_rows - 1, 3);
       xy = (xy * 2 + grids_[stage]) * strides_[stage];
       wh = arma::pow((wh * 2), 2) % anchor_grids_[stage];
@@ -124,6 +134,7 @@ StatusCode YoloDetectLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
     concat_rows += stages_tensor->rows();
   }
 
+  // 将各 stage 的张量沿行维度拼接为最终输出
   for (uint32_t i = 0; i < batch_size; ++i) {
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
     if (output == nullptr || output->empty()) {
@@ -172,6 +183,7 @@ StatusCode YoloDetectLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
   std::vector<float> strides = stages_attr->get<float>();
   CHECK(strides.size() == stages_number) << "Stride number is not equal to strides";
 
+  // 解析 anchor_grids（倒序遍历 pnnx_4, pnnx_2, pnnx_0）
   int32_t num_anchors = -1;
   std::vector<arma::fmat> anchor_grids;
   for (int32_t i = 4; i >= 0; i -= 2) {
@@ -203,6 +215,7 @@ StatusCode YoloDetectLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     anchor_grids.emplace_back(anchor_grid_matrix.t());
   }
 
+  // 解析 grids（顺序遍历 pnnx_6, pnnx_3, pnnx_1）
   std::vector<arma::fmat> grids;
   std::vector<int32_t> grid_indexes{6, 3, 1};
   for (const auto grid_index : grid_indexes) {
@@ -234,6 +247,7 @@ StatusCode YoloDetectLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     grids.emplace_back(matrix.t());
   }
 
+  // 为每个 stage 创建 1x1 卷积层并加载权重和偏置
   std::vector<std::shared_ptr<ConvolutionLayer>> conv_layers(stages_number);
   int32_t num_classes = -1;
   for (int32_t i = 0; i < stages_number; ++i) {

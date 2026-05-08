@@ -5,6 +5,7 @@
 
 namespace net_infer {
 
+/// Checks whether the convolution degenerates to a simple 1x1 pointwise convolution without padding.
 bool ConvolutionLayer::Is1x1KernelNoPadding(uint32_t kernel_h, uint32_t kernel_w) const {
   if (stride_h_ == 1 && stride_w_ == 1 && dilation_h_ == 1 && dilation_w_ == 1 && kernel_w == 1 &&
       kernel_h == 1) {
@@ -15,6 +16,8 @@ bool ConvolutionLayer::Is1x1KernelNoPadding(uint32_t kernel_h, uint32_t kernel_w
   return false;
 }
 
+/// Initializes kernel matrices for im2col by flattening each kernel into a continuous memory block.
+/// For 1x1 kernels without padding, stores as column vectors; otherwise stores as row vectors.
 void ConvolutionLayer::InitIm2ColWeight() {
   const uint32_t kernel_count = this->weights_.size();
   CHECK(kernel_count > 0) << "kernel count must greater than zero";
@@ -57,6 +60,7 @@ void ConvolutionLayer::InitIm2ColWeight() {
   }
 }
 
+/// Computes output for one group: first transforms input to columns via im2col, then performs GEMM with kernels.
 void ConvolutionLayer::ComputeOutput(sftensor input, sftensor output_tensor, uint32_t kernel_h,
                                      uint32_t kernel_w, uint32_t kernel_count_group,
                                      uint32_t input_h, uint32_t input_w,
@@ -73,6 +77,8 @@ void ConvolutionLayer::ComputeOutput(sftensor input, sftensor output_tensor, uin
   }
 }
 
+/// Rearranges image patches into columns (im2col) to allow convolution via matrix multiplication.
+/// Handles padding by filling out-of-bound positions with zero.
 arma::fmat ConvolutionLayer::ConvIm2Col(sftensor input, uint32_t kernel_h, uint32_t kernel_w,
                                         uint32_t input_h, uint32_t input_w,
                                         uint32_t channels_per_group, uint32_t output_h,
@@ -80,6 +86,7 @@ arma::fmat ConvolutionLayer::ConvIm2Col(sftensor input, uint32_t kernel_h, uint3
                                         uint32_t col_len) const {
   CHECK(input && !input->empty()) << "The input tensor of the im2col function cannot be empty.";
   const float padding_value = 0.f;
+  // For 1x1 convolution with no padding, directly use the input data as a matrix view without copying.
   if (Is1x1KernelNoPadding(kernel_h, kernel_w)) {
     arma::fmat input_matrix(input->raw_ptr(), col_len, channels_per_group * row_len, false, true);
     return input_matrix;
@@ -92,6 +99,7 @@ arma::fmat ConvolutionLayer::ConvIm2Col(sftensor input, uint32_t kernel_h, uint3
     float* input_channel_ptr = input->matrix_raw_ptr(ic + channels_offset);
     uint32_t current_col = 0;
     uint32_t channel_row = ic * row_len;
+    // Slide the kernel window over the input and copy each patch into a column of input_matrix.
     for (uint32_t w = 0, iw = 0; w < output_w; ++w, iw += stride_w_) {
       for (uint32_t r = 0, ih = 0; r < output_h; ++r, ih += stride_h_) {
         float* input_matrix_ptr = input_matrix.colptr(current_col) + channel_row;
@@ -115,6 +123,8 @@ arma::fmat ConvolutionLayer::ConvIm2Col(sftensor input, uint32_t kernel_h, uint3
   return input_matrix;
 }
 
+/// Performs matrix multiplication between the kernel and the im2col input matrix, storing the result
+/// into the appropriate slice of the output tensor and adding the bias term.
 void ConvolutionLayer::ConvGEMMBias(const arma::fmat& input_matrix, sftensor output_tensor,
                                     uint32_t group, uint32_t kernel_index,
                                     uint32_t kernel_count_group, uint32_t output_h,
@@ -126,6 +136,7 @@ void ConvolutionLayer::ConvGEMMBias(const arma::fmat& input_matrix, sftensor out
   kernel_index = kernel_index + group * kernel_count_group;
   const arma::fmat& kernel = this->kernel_matrix_arr_.at(kernel_index);
 
+  // Create a non-owning matrix view into the output tensor's channel slice.
   arma::fmat output(output_tensor->matrix_raw_ptr(kernel_index), output_h, output_w, false, true);
   if (is_1x1conv_nopadding) {
     output = input_matrix * kernel;
@@ -135,6 +146,7 @@ void ConvolutionLayer::ConvGEMMBias(const arma::fmat& input_matrix, sftensor out
   return AddBias(output, kernel_index);
 }
 
+/// Computes the spatial dimensions of the output feature map using the standard conv2d formula.
 std::pair<uint32_t, uint32_t> ConvolutionLayer::ComputeOutputSize(const uint32_t input_h,
                                                                   const uint32_t input_w,
                                                                   const uint32_t kernel_h,

@@ -6,8 +6,11 @@
 #include "utils/math/fmath.hpp"
 namespace net_infer {
 
+// 构造函数，dim为softmax运算所在的维度
 SoftmaxLayer::SoftmaxLayer(int32_t dim) : NonParamLayer("Softmax"), softmax_dim_(dim) {}
 
+// Softmax层前向传播
+// 对每个batch中的tensor沿指定维度计算softmax: exp(x_i - max) / sum(exp(x_j - max))
 StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                  std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   if (inputs.empty()) {
@@ -45,20 +48,24 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
     int32_t dim = this->softmax_dim_;
     std::vector<uint32_t> raw_shapes = input->raw_shapes();
 
+    // 处理负数维度索引
     if (dim < 0) {
       dim += int32_t(raw_shapes.size());
     }
 
+    // 合法性检查：维度范围需要在[0, 2]且不超过实际维度数
     if (dim < 0 || dim >= 3 || dim > raw_shapes.size()) {
       LOG(FATAL) << "Error softmax dimension, which need between 0 and 2, "
                     "but dimension is "
                  << dim;
     }
 
+    // 一维tensor且dim==0时的简化路径：直接对整个数组做softmax
     if (raw_shapes.size() == 1 && dim == 0) {
       float* input_ptr = input->raw_ptr();
       float* output_ptr = output->raw_ptr();
       int32_t size = static_cast<int32_t>(raw_shapes.front());
+      // 先找出最大值，用于数值稳定性
       float max_value = *std::max_element(input_ptr, input_ptr + size);
 
       int32_t index = 0;
@@ -68,6 +75,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
       input_ptr = input->raw_ptr();
       __m256 sum_vec = _mm256_setzero_ps();
       __m256 max_value256 = _mm256_set1_ps(max_value);
+      // 使用AVX2向量指令计算exp(x - max)并累加
       for (; index <= size - packet_size; index += packet_size) {
         __m256 p = _mm256_loadu_ps(input_ptr);
         __m256 exp_sub_value = fmath::exp_ps256(_mm256_sub_ps(p, max_value256));
@@ -76,10 +84,12 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
         input_ptr += packet_size;
         output_ptr += packet_size;
       }
+      // 水平求和得到总和
       sum_vec = _mm256_hadd_ps(sum_vec, sum_vec);
       sum_vec = _mm256_hadd_ps(sum_vec, sum_vec);
       sum_value = ((float*)&sum_vec)[0] + ((float*)&sum_vec)[4];
 #endif
+      // 标量处理剩余不足packet长度的元素
       if (index < size) {
         input_ptr = input->raw_ptr(index);
         output_ptr = output->raw_ptr(index);
@@ -94,6 +104,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
         }
       }
 
+      // 将每个exp值除以总和，得到softmax概率
       index = 0;
 #ifdef __AVX2__
       output_ptr = output->raw_ptr();
@@ -113,6 +124,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
         }
       }
     } else {
+      // 多维tensor：将形状填充到3维，方便统一处理
       const uint32_t padding_size_num = 3 - raw_shapes.size();
       for (uint32_t j = 0; j < padding_size_num; ++j) {
         raw_shapes.push_back(1);
@@ -151,6 +163,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
             tmp_storage.at(axis_size) = cur_value;
           }
 
+          // 计算exp(x - max)以及总和
           float sum_value = 0.f;
           int32_t axis_size = 0;
 #ifdef __AVX2__
@@ -176,6 +189,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
             tmp_storage.at(axis_size) = exp_sub_value;
           }
 
+          // 除以总和进行归一化
 #ifdef __AVX2__
           tmp_storage_ptr = tmp_storage.data();
           sum_vec = _mm256_set1_ps(sum_value);
@@ -190,7 +204,7 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
             tmp_storage.at(axis_size) = tmp_storage.at(axis_size) / sum_value;
           }
 
-          // 迭代当前dim中的数据，求exp(cur_value - max_value) / sum_value
+          // 将计算结果写回output_values
           for (axis_size = 0; axis_size < axis_sizes; ++axis_size) {
             uint32_t index = base_index + axis_size * inner_sizes;
             float div_value = tmp_storage.at(axis_size);
@@ -203,6 +217,8 @@ StatusCode SoftmaxLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
   }
   return StatusCode::kSuccess;
 }
+
+// 从RuntimeOperator参数创建SoftmaxLayer实例
 StatusCode SoftmaxLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                         std::shared_ptr<Layer<float>>& softmax_layer) {
   if (!op) {

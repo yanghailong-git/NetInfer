@@ -1,8 +1,24 @@
 #include "upsample.hpp"
 #include <cmath>
 #include "layer/abstract/layer_factory.hpp"
+
 namespace net_infer {
 
+/**
+ * @brief 计算双线性插值中输入像素索引和插值权重
+ * @param input_size 输入维度大小
+ * @param output_size 输出维度大小
+ * @param div_scale 缩放比例的倒数（或用于 align_corners 的缩放系数）
+ * @param output_idx 输出位置的索引
+ * @param lambda0 第一个相邻输入像素的权重
+ * @param lambda1 第二个相邻输入像素的权重
+ * @param input_index0 第一个相邻输入像素的索引
+ * @param input_index1 第二个相邻输入像素的索引
+ * @param is_align_corner 是否使用 align_corners 模式
+ *
+ * 当 input_size == output_size 时直接一对一映射；
+ * 否则根据 align_corners 标志计算对应的输入坐标和双线性权重。
+ */
 static void CalcIndexAndLambda(int32_t input_size, int32_t output_size, float div_scale,
                                int32_t output_idx, float& lambda0, float& lambda1,
                                int32_t& input_index0, int32_t& input_index1, bool is_align_corner) {
@@ -64,6 +80,7 @@ StatusCode UpSampleLayer::Forward(const std::vector<std::shared_ptr<Tensor<float
     LOG_IF(FATAL, input_data.empty())
         << "The input tensor array in the upsample layer has an empty tensor " << i << " th";
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
+    // 若输出未分配，则根据输入尺寸和缩放比例自动创建
     if (output == nullptr || output->empty()) {
       output = std::make_shared<Tensor<float>>(input_data.n_slices, input_data.n_rows * scale_h,
                                                input_data.n_cols * scale_w);
@@ -96,6 +113,7 @@ StatusCode UpSampleLayer::Forward(const std::vector<std::shared_ptr<Tensor<float
           const uint32_t input_h = input_channel.n_rows;
           const uint32_t output_w = output_channel.n_cols;
           const uint32_t output_h = output_channel.n_rows;
+          // 最近邻插值：将输入像素复制到对应的输出区域块
           for (uint32_t w = 0; w < input_w; ++w) {
             const uint32_t dest_w = w * scale_w;
             const float* input_col_ptr = input_channel.colptr(w);
@@ -136,6 +154,7 @@ StatusCode UpSampleLayer::Forward(const std::vector<std::shared_ptr<Tensor<float
             div_scale_h = static_cast<float>(input_h - 1) / static_cast<float>(output_h - 1);
             div_scale_w = static_cast<float>(input_w - 1) / static_cast<float>(output_w - 1);
           }
+          // 双线性插值：逐输出像素计算四个相邻输入像素的加权平均
           for (uint32_t w = 0; w < output_w; ++w) {
             float w0_lambda = 0.f;
             float w1_lambda = 0.f;

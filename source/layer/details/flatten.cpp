@@ -4,9 +4,12 @@
 #include "layer/abstract/layer_factory.hpp"
 
 namespace net_infer {
+
+// Constructor: initializes the flatten layer with start and end dimensions
 FlattenLayer::FlattenLayer(int32_t start_dim, int32_t end_dim)
     : NonParamLayer("Flatten"), start_dim_(start_dim), end_dim_(end_dim) {}
 
+// Forward pass: flattens the input tensor dimensions from start_dim to end_dim
 StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                  std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   if (inputs.empty()) {
@@ -29,6 +32,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
   int32_t end_dim = end_dim_;
   int32_t total_dims = 4;  // NCHW
 
+  // Handle negative dimensions (e.g., -1 means last dimension)
   if (start_dim < 0) {
     start_dim = total_dims + start_dim;
   }
@@ -36,6 +40,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
     end_dim = total_dims + end_dim;
   }
 
+  // Validate dimension range
   if (end_dim <= start_dim) {
     LOG(ERROR) << "The end dim must greater than start dim";
     return StatusCode::kInferParamError;
@@ -56,11 +61,13 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
       return StatusCode::kInferInputsEmpty;
     }
 
+    // Compute the total number of elements in the flattened range
     std::vector<uint32_t> shapes = input->shapes();
     shapes.insert(shapes.begin(), batch_size);
     uint32_t elements_size = std::accumulate(shapes.begin() + start_dim,
                                              shapes.begin() + end_dim + 1, 1, std::multiplies());
 
+    // Clone input to output and reshape
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
     output = TensorClone(input);
     CHECK(input->size() == output->size()) << "The output and input shapes of the flatten layer do "
@@ -68,12 +75,16 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
                                            << i << " th";
     outputs.at(i) = output;
 
+    // Reshape according to different flatten dimension combinations
     if (start_dim == 1 && end_dim == 3) {
+      // Flatten C, H, W into a single dimension
       output->Reshape({elements_size}, true);
     } else if (start_dim == 2 && end_dim == 3) {
+      // Flatten H, W, keep C
       uint32_t channels = input->channels();
       output->Reshape({channels, elements_size}, true);
     } else if (start_dim == 1 && end_dim == 2) {
+      // Flatten C, H, keep W
       uint32_t cols = input->cols();
       output->Reshape({elements_size, cols}, true);
     } else {
@@ -84,6 +95,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
   return StatusCode::kSuccess;
 }
 
+// Factory method: create a FlattenLayer instance from RuntimeOperator parameters
 StatusCode FlattenLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                         std::shared_ptr<Layer<float>>& flatten_layer) {
   if (!op) {
@@ -119,6 +131,7 @@ StatusCode FlattenLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& 
   return StatusCode::kSuccess;
 }
 
+// Register the flatten layer (corresponds to torch.flatten)
 LayerRegistererWrapper kFlattenCreateInstance(FlattenLayer::CreateInstance, "torch.flatten");
 
 }  // namespace net_infer

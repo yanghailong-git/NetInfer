@@ -4,6 +4,8 @@
 #include "layer/abstract/layer.hpp"
 #include "status_code.hpp"
 namespace net_infer {
+
+/// Constructor that initializes convolution parameters, validates dimensions, and allocates weight/bias tensors.
 BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_channel,
                                            uint32_t in_channel, uint32_t kernel_h,
                                            uint32_t kernel_w, uint32_t padding_h,
@@ -23,6 +25,7 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
       output_padding_w_(output_padding_w),
       dilation_h_(dilation_h),
       dilation_w_(dilation_w) {
+  // Adjust input channels per group when using grouped convolution.
   if (groups != 1) {
     in_channel /= groups;
   }
@@ -35,10 +38,12 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
   CHECK_GT(dilation_h_, 0);
   CHECK_GT(dilation_w_, 0);
 
+  // Regular convolution does not support output padding.
   if (conv_type_ == ConvType::kOpConv) {
     CHECK_EQ(output_padding_h_, 0);
     CHECK_EQ(output_padding_w_, 0);
   } else if (conv_type_ == ConvType::kOpDeconv) {
+    // Adjust kernel size to account for dilation in transposed convolution.
     if (dilation_h > 1) kernel_h = (kernel_h - 1) * (dilation_h_ - 1) + kernel_h;
     if (dilation_w > 1) kernel_w = (kernel_w - 1) * (dilation_w_ - 1) + kernel_w;
   } else {
@@ -55,6 +60,7 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
 
 void BaseConvolutionLayer::InitIm2ColWeight() {}
 
+/// Adds the bias value at the specified index to the entire output matrix.
 void BaseConvolutionLayer::AddBias(arma::fmat& output, uint32_t bias_index) const {
   if (!this->bias_.empty() && this->use_bias_) {
     std::shared_ptr<Tensor<float>> bias;
@@ -68,6 +74,7 @@ void BaseConvolutionLayer::AddBias(arma::fmat& output, uint32_t bias_index) cons
   }
 }
 
+/// Forward pass: iterates over the batch and groups, computing the convolution output for each sample.
 StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                          std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode check_code = Check(inputs, outputs);
@@ -80,6 +87,7 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
   const uint32_t kernel_w = this->weights_.at(0)->cols();
   const uint32_t kernel_channel = this->weights_.at(0)->channels();
 
+  // Lazily initialize im2col weight matrices if not already done.
   if (kernel_matrix_arr_.size() != kernel_count) {
     InitIm2ColWeight();
   }
@@ -112,6 +120,7 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
            "incorrectly sized tensor "
         << i << "th";
 
+    // Process each group independently; parallelize only when groups > 1 to avoid overhead.
 #pragma omp parallel for if (groups_ > 1)
     for (uint32_t group = 0; group < groups_; ++group) {
       if (groups_ != 1) {
@@ -128,6 +137,8 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
   return StatusCode::kSuccess;
 }
 
+/// Parses a runtime operator to create either a ConvolutionLayer or DeconvolutionLayer.
+/// Reads parameters such as dilation, channels, padding, stride, kernel_size, groups, bias, etc.
 StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                                 std::shared_ptr<Layer<float>>& conv_layer) {
   if (!op) {
@@ -217,6 +228,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
     return StatusCode::kParseParamError;
   }
 
+  // Verify padding mode for standard Conv2d; only "zeros" is supported.
   if (op->type == "nn.Conv2d") {
     if (op->has_parameter("padding_mode")) {
       auto padding_mode =
@@ -287,6 +299,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
     }
   }
 
+  // Determine convolution type from operator name.
   ConvType conv_type = ConvType::kOpConv;
   if (op->type == "nn.Conv2d") {
     conv_type = ConvType::kOpConv;
@@ -309,7 +322,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
         output_padding_h, output_padding_w, dilation_h, dilation_w);
   }
 
-  // load weights
+  // Load weights
   const std::map<std::string, std::shared_ptr<RuntimeAttribute>>& attrs = op->attribute;
   if (use_bias->value) {
     if (!op->has_attribute("bias")) {
@@ -349,6 +362,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
   return StatusCode::kSuccess;
 }
 
+/// Validates input/output sizes, kernel dimensions, bias consistency, stride/dilation validity, and group constraints.
 StatusCode BaseConvolutionLayer::Check(const std::vector<sftensor>& inputs,
                                        const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {
@@ -428,6 +442,7 @@ StatusCode BaseConvolutionLayer::Check(const std::vector<sftensor>& inputs,
     return StatusCode::kInferParamError;
   }
 
+  // Ensure all kernels have uniform dimensions.
   for (uint32_t k = 0; k < kernel_count; ++k) {
     const std::shared_ptr<Tensor<float>>& kernel = this->weights_.at(k);
     if (kernel->rows() != kernel_h) {

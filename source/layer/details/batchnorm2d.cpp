@@ -4,6 +4,8 @@
 
 namespace net_infer {
 
+/// Forward pass: normalizes each channel of every input tensor using running mean and variance,
+/// then applies the affine transformation (gamma * x + beta).
 StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   if (inputs.empty()) {
@@ -22,6 +24,7 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
     return StatusCode::kInferDimMismatch;
   }
 
+  // Verify consistency between mean, variance, gamma, and beta parameter counts.
   const uint32_t mean_value_size = this->weights_.size();
   const uint32_t bias_value_size = this->bias_.size();
   if (mean_value_size != bias_value_size) {
@@ -61,6 +64,7 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
            "layer do not match "
         << b << " th";
 
+    // Apply batch normalization channel by channel.
     for (uint32_t i = 0; i < mean_value_size; ++i) {
       CHECK(weights_.at(i)->size() == 1 && bias_.at(i)->size() == 1);
       const float mean_value = weights_.at(i)->index(0);
@@ -75,6 +79,8 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
   return StatusCode::kSuccess;
 }
 
+/// Parses runtime operator parameters and attributes to instantiate a BatchNorm2dLayer.
+/// Loads running_mean, running_var, weight (gamma), and bias (beta).
 StatusCode BatchNorm2dLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                             std::shared_ptr<Layer<float>>& batch_layer) {
   if (!op) {
@@ -110,7 +116,7 @@ StatusCode BatchNorm2dLayer::CreateInstance(const std::shared_ptr<RuntimeOperato
     return StatusCode::kParseParamError;
   }
 
-  // load weights
+  // Load weights and running statistics from attributes.
   const auto& attrs = op->attribute;
   CHECK(!attrs.empty()) << "Operator attributes is empty";
 

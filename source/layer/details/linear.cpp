@@ -4,6 +4,10 @@
 
 namespace net_infer {
 
+// Constructor: initializes the linear (fully connected) layer
+// in_features: number of input features
+// out_features: number of output features
+// use_bias: whether to use bias
 LinearLayer::LinearLayer(int32_t in_features, int32_t out_features, bool use_bias)
     : ParamLayer("Linear"),
       use_bias_(use_bias),
@@ -11,12 +15,16 @@ LinearLayer::LinearLayer(int32_t in_features, int32_t out_features, bool use_bia
       out_features_(out_features) {
   CHECK_GT(in_features_, 0);
   CHECK_GT(out_features_, 0);
+  // Initialize weight tensor with shape [1, 1, in_features, out_features]
   this->InitWeightParam(1, 1, in_features_, out_features_);
   if (use_bias) {
+    // Initialize bias tensor with shape [1, 1, 1, out_features]
     this->InitBiasParam(1, 1, 1, out_features);
   }
 }
 
+// Sets weights from a flat vector
+// The weights are expected to be in shape [out_features, in_features]
 void LinearLayer::set_weights(const std::vector<float>& weights) {
   const size_t elem_size = weights.size();
   const uint32_t batch_size = this->weights_.size();
@@ -33,10 +41,12 @@ void LinearLayer::set_weights(const std::vector<float>& weights) {
   }
 }
 
+// Sets weights from a vector of tensors (delegates to base class)
 void LinearLayer::set_weights(const std::vector<std::shared_ptr<Tensor<float>>>& weights) {
   return ParamLayer::set_weights(weights);
 }
 
+// Forward pass: computes the linear transformation y = xW^T + b for each input in the batch
 StatusCode LinearLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                 std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode check_status = Check(inputs, outputs);
@@ -46,8 +56,10 @@ StatusCode LinearLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>
 
   uint32_t batch = inputs.size();
   const std::shared_ptr<Tensor<float>>& weight = weights_.front();
+  // Create an Armadillo matrix view of the weight tensor [in_features x out_features]
   arma::fmat weight_data_t(weight->raw_ptr(), in_features_, out_features_, false, true);
 
+  // Parallel processing over the batch dimension
 #pragma omp parallel for num_threads(batch)
   for (uint32_t i = 0; i < batch; ++i) {
     const std::shared_ptr<Tensor<float>>& input = inputs.at(i);
@@ -57,18 +69,22 @@ StatusCode LinearLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>
 
     const uint32_t feature_dims = input_shapes.at(1);
     const uint32_t in_features = input_shapes.at(2);
+    // Validate weight dimensions
     CHECK(weight_data_t.n_cols == out_features_)
         << "The row of weight tensor should be same to output features.";
     CHECK(weight_data_t.n_rows == in_features && in_features == in_features_)
         << "The col of weight tensor should be same to input features.";
 
+    // Create an Armadillo matrix view of the input tensor [feature_dims x in_features]
     arma::fmat input_vec(input->raw_ptr(), feature_dims, in_features_, false, true);
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
     if (output == nullptr || output->empty()) {
+      // Allocate output tensor if not provided
       output = std::make_shared<Tensor<float>>(1, out_features_, feature_dims);
       outputs.at(i) = output;
     }
 
+    // Validate output dimensions
     const auto& output_raw_shapes = output->raw_shapes();
     if (output_raw_shapes.size() == 2) {
       CHECK(output_raw_shapes.at(0) == feature_dims && output_raw_shapes.at(1) == out_features_)
@@ -81,9 +97,11 @@ StatusCode LinearLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>
       LOG(FATAL) << "The shape of output tensor need be equal to one or two";
     }
 
+    // Compute linear transformation: result = input * weight
     arma::fmat& result = output->slice(0);
     result = input_vec * weight_data_t;
     if (use_bias_) {
+      // Add bias to each row of the result
       CHECK(!this->bias_.empty() && this->bias_.size() == 1)
           << "The bias tensor is empty, but \"use bias\" is true";
 
@@ -96,6 +114,7 @@ StatusCode LinearLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>
   return StatusCode::kSuccess;
 }
 
+// Factory method: creates a LinearLayer instance from a RuntimeOperator
 StatusCode LinearLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                        std::shared_ptr<Layer<float>>& linear_layer) {
   if (!op) {
@@ -109,6 +128,7 @@ StatusCode LinearLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& o
     return StatusCode::kParseParamError;
   }
 
+  // Parse use_bias parameter
   if (!op->has_parameter("bias")) {
     LOG(ERROR) << "Can not find the use bias parameter in the parameter list.";
     return StatusCode::kParseParamError;
@@ -119,6 +139,7 @@ StatusCode LinearLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& o
     return StatusCode::kParseParamError;
   }
 
+  // Parse weight and bias attributes
   const auto& attr = op->attribute;
   if (attr.empty()) {
     LOG_IF(ERROR, attr.empty()) << "The attributes of the operator is empty.";
@@ -145,6 +166,7 @@ StatusCode LinearLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& o
     return StatusCode::kParseWeightError;
   }
 
+  // Extract layer dimensions from weight shape [out_features, in_features]
   int32_t out_features = shapes.at(0);
   int32_t in_features = shapes.at(1);
   const bool use_bias = use_bias_param->value;
@@ -159,6 +181,7 @@ StatusCode LinearLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& o
   return StatusCode::kSuccess;
 }
 
+// Validates input, output, weight, and bias tensors before forward pass
 StatusCode LinearLayer::Check(const std::vector<sftensor>& inputs,
                               const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {
@@ -199,6 +222,7 @@ StatusCode LinearLayer::Check(const std::vector<sftensor>& inputs,
   return StatusCode::kSuccess;
 }
 
+// Register the linear layer (corresponds to PyTorch's nn.Linear)
 LayerRegistererWrapper kLinearCreateInstance(LinearLayer::CreateInstance, "nn.Linear");
 
 }  // namespace net_infer

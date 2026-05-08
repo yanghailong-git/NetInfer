@@ -13,6 +13,7 @@ MaxPoolingLayer::MaxPoolingLayer(uint32_t padding_h, uint32_t padding_w, uint32_
       pooling_size_w_(pooling_size_w),
       stride_h_(stride_h),
       stride_w_(stride_w) {
+  // Ensure stride and pooling sizes are positive.
   CHECK_GT(stride_h_, 0);
   CHECK_GT(stride_w_, 0);
   CHECK_GT(pooling_size_h_, 0);
@@ -21,6 +22,7 @@ MaxPoolingLayer::MaxPoolingLayer(uint32_t padding_h, uint32_t padding_w, uint32_
 
 StatusCode MaxPoolingLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                     std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
+  // Run pre-forward checks (non-empty, matching sizes, valid params).
   StatusCode check_status = Check(inputs, outputs);
   if (check_status != StatusCode::kSuccess) {
     return check_status;
@@ -30,21 +32,25 @@ StatusCode MaxPoolingLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
   const uint32_t pooling_h = pooling_size_h_;
   const uint32_t pooling_w = pooling_size_w_;
 
+  // Process each sample in the batch in parallel.
 #pragma omp parallel for num_threads(batch)
   for (uint32_t i = 0; i < batch; ++i) {
     const std::shared_ptr<Tensor<float>>& input_data = inputs.at(i);
 
+    // Cache input spatial dimensions.
     const uint32_t input_h = input_data->rows();
     const uint32_t input_w = input_data->cols();
     const uint32_t input_padded_h = input_data->rows() + 2 * padding_h_;
     const uint32_t input_padded_w = input_data->cols() + 2 * padding_w_;
     const uint32_t input_c = input_data->channels();
 
+    // Compute output spatial dimensions using standard pooling formula.
     const uint32_t output_h =
         uint32_t(std::floor((int32_t(input_padded_h) - int32_t(pooling_h)) / stride_h_ + 1));
     const uint32_t output_w =
         uint32_t(std::floor((int32_t(input_padded_w) - int32_t(pooling_w)) / stride_w_ + 1));
 
+    // Allocate output tensor if missing.
     std::shared_ptr<Tensor<float>> output_data = outputs.at(i);
     if (output_data == nullptr || output_data->empty()) {
       output_data = std::make_shared<Tensor<float>>(input_c, output_h, output_w);
@@ -56,6 +62,7 @@ StatusCode MaxPoolingLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
            "has an incorrectly sized tensor "
         << i << "th";
 
+    // Iterate over each channel and each pooling window position.
     for (uint32_t ic = 0; ic < input_c; ++ic) {
       const arma::fmat& input_channel = input_data->slice(ic);
       arma::fmat& output_channel = output_data->slice(ic);
@@ -65,10 +72,12 @@ StatusCode MaxPoolingLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
           uint32_t output_row = uint32_t(r / stride_h_);
           float* output_channel_ptr = output_channel.colptr(output_col);
           float max_value = std::numeric_limits<float>::lowest();
+          // Slide the pooling window and find the maximum value.
           for (uint32_t w = 0; w < pooling_w; ++w) {
             const float* col_ptr = input_channel.colptr(c + w - padding_w_) + r;
             for (uint32_t h = 0; h < pooling_h; ++h) {
               float current_value = 0.f;
+              // Check whether the current position falls within the valid (non-padded) area.
               if ((h + r >= padding_h_ && w + c >= padding_w_) &&
                   (h + r < input_h + padding_h_ && w + c < input_w + padding_w_)) {
                 current_value = *(col_ptr + h - padding_h_);
@@ -78,6 +87,7 @@ StatusCode MaxPoolingLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
               max_value = std::max(max_value, current_value);
             }
           }
+          // Write the pooled maximum value to the output.
           *(output_channel_ptr + output_row) = max_value;
         }
       }
@@ -99,6 +109,7 @@ StatusCode MaxPoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     return StatusCode::kParseParamError;
   }
 
+  // Extract stride parameter (expected as a 2-element int array).
   if (params.find("stride") == params.end()) {
     LOG(ERROR) << "Can not find the stride parameter";
     return StatusCode::kParseParamError;
@@ -110,6 +121,7 @@ StatusCode MaxPoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     return StatusCode::kParseParamError;
   }
 
+  // Extract padding parameter.
   if (params.find("padding") == params.end()) {
     LOG(ERROR) << "Can not find the padding parameter";
     return StatusCode::kParseParamError;
@@ -121,6 +133,7 @@ StatusCode MaxPoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     return StatusCode::kParseParamError;
   }
 
+  // Extract kernel_size parameter.
   if (params.find("kernel_size") == params.end()) {
     LOG(ERROR) << "Can not find the kernel size parameter";
     return StatusCode::kParseParamError;
@@ -135,6 +148,7 @@ StatusCode MaxPoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
   const auto& stride_values = stride->value;
   const auto& kernel_values = kernel_size->value;
 
+  // Validate dimensions for each parameter array.
   const uint32_t dims = 2;
   if (padding_values.size() != dims) {
     LOG(ERROR) << "Can not find the right padding parameter";
@@ -151,6 +165,7 @@ StatusCode MaxPoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator
     return StatusCode::kParseParamError;
   }
 
+  // Construct the max pooling layer with parsed parameters.
   max_layer = std::make_shared<MaxPoolingLayer>(padding_values.at(0), padding_values.at(1),
                                                 kernel_values.at(0), kernel_values.at(1),
                                                 stride_values.at(0), stride_values.at(1));

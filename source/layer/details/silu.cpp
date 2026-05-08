@@ -6,9 +6,11 @@
 
 namespace net_infer {
 using namespace activation;
+
 StatusCode SiLULayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                               std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   using namespace activation;
+  // Delegate to the base ActivationLayer which performs the actual SiLU computation.
   return ActivationLayer::Forward(inputs, outputs);
 }
 
@@ -18,6 +20,7 @@ StatusCode SiLULayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
     LOG(ERROR) << "The SiLU operator parameter in the layer is null pointer.";
     return StatusCode::kParseNullOperator;
   }
+  // SiLU has no parameters; simply instantiate the layer.
   silu_layer = std::make_shared<SiLULayer>();
   return StatusCode::kSuccess;
 }

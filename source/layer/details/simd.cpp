@@ -7,6 +7,8 @@ namespace net_infer {
 
 namespace activation {
 
+// Computes the sigmoid activation function element-wise using SIMD (AVX2/SSE)
+// for the whole tensor, followed by a scalar fallback for any remaining elements.
 static void SigmoidSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -17,6 +19,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   const float* in_ptr = input->raw_ptr();
   float* out_ptr = output->raw_ptr();
 #ifdef __AVX2__
+  // AVX2 processes 8 floats per iteration.
   packet_size = 8;
   __m256 one = _mm256_set1_ps(1.f);
   __m256 zero = _mm256_setzero_ps();
@@ -28,6 +31,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
     out_ptr += packet_size;
   }
 #ifdef __SSE2__
+  // SSE2 processes 4 floats per iteration for the remaining elements.
   packet_size = 4;
   __m128 one128 = _mm_set1_ps(1.f);
   __m128 zero128 = _mm_setzero_ps();
@@ -40,6 +44,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the tail elements that do not fill a SIMD packet.
   if (index < in_size) {
     while (index < in_size) {
       float value = input->index(index);
@@ -49,6 +54,8 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   }
 }
 
+// Computes the ReLU activation function element-wise using SIMD (AVX2/SSE):
+// output = max(0, input).
 static void ReluSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -80,6 +87,7 @@ static void ReluSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the remaining elements.
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -89,6 +97,8 @@ static void ReluSSE(sftensor input, sftensor output) {
   }
 }
 
+// Computes the ReLU6 activation function element-wise using SIMD (AVX2/SSE):
+// output = min(max(0, input), 6).
 static void Relu6SSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -123,6 +133,7 @@ static void Relu6SSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the remaining elements.
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -132,6 +143,8 @@ static void Relu6SSE(sftensor input, sftensor output) {
   }
 }
 
+// Computes the SiLU (Sigmoid Linear Unit) activation function element-wise using SIMD:
+// output = input / (1 + exp(-input)).
 static void SiluSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -167,6 +180,7 @@ static void SiluSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the remaining elements.
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -176,6 +190,10 @@ static void SiluSSE(sftensor input, sftensor output) {
   }
 }
 
+// Computes the HardSwish activation function element-wise using SIMD:
+//   0                         if x <= -3
+//   x                         if x >= 3
+//   x * (x + 3) / 6           otherwise
 static void HardSwishSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -197,11 +215,13 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   for (index = 0; index <= size - packet_size; index += packet_size) {
     __m256 x = _mm256_loadu_ps(in_ptr);
 
+    // Build masks for the three piece-wise branches.
     __m256 le_branch = _mm256_cmp_ps(x, minus_three, _CMP_LE_OS);  // <= -3
     __m256 ge_branch = _mm256_cmp_ps(x, three, _CMP_GE_OS);        // >= 3
     __m256 mid_branch = _mm256_and_ps(_mm256_cmp_ps(x, minus_three, _CMP_GT_OS),
                                       _mm256_cmp_ps(x, three, _CMP_LT_OS));  // -3 < x < 3
 
+    // Compute each branch and mask out the inactive lanes.
     __m256 f1 = _mm256_and_ps(zero, le_branch);
     __m256 f2 = _mm256_and_ps(x, ge_branch);
     __m256 f3 =
@@ -239,6 +259,7 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the tail elements.
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -256,6 +277,10 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   }
 }
 
+// Computes the HardSigmoid activation function element-wise using SIMD:
+//   0                         if x <= -3
+//   1                         if x >= 3
+//   x / 6 + 0.5               otherwise
 static void HardSigmoidSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -322,6 +347,7 @@ static void HardSigmoidSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
+  // Scalar fallback for the tail elements.
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -339,6 +365,7 @@ static void HardSigmoidSSE(sftensor input, sftensor output) {
   }
 }
 
+// Returns the SIMD-accelerated activation function corresponding to the given type.
 ActivationFunc ApplySSEActivation(ActivationType act_type) {
   ActivationFunc function;
   switch (act_type) {

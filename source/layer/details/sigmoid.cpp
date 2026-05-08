@@ -5,11 +5,13 @@
 
 namespace net_infer {
 using namespace activation;
+
 SigmoidLayer::SigmoidLayer() : ActivationLayer(ActivationType::kActivationSigmoid, "nn.Sigmoid") {}
 
 StatusCode SigmoidLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                  std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   using namespace activation;
+  // Delegate to the base ActivationLayer which performs the actual sigmoid computation.
   return ActivationLayer::Forward(inputs, outputs);
 }
 
@@ -19,6 +21,7 @@ StatusCode SigmoidLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& 
     LOG(ERROR) << "The sigmoid operator parameter in the layer is null pointer.";
     return StatusCode::kParseNullOperator;
   }
+  // Sigmoid has no parameters; simply instantiate the layer.
   sigmoid_layer = std::make_shared<SigmoidLayer>();
   return StatusCode::kSuccess;
 }

@@ -6,6 +6,7 @@
 
 namespace net_infer {
 
+// View层前向传播：改变tensor的形状（reshape），不改变底层数据内容
 StatusCode ViewLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                               std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode status_code = Check(inputs, outputs);
@@ -36,6 +37,7 @@ StatusCode ViewLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>&
       }
     }
 
+    // 如果存在-1，则自动推断该维度的大小（要求-1只能出现在最后一个维度）
     if (dynamic_index != -1 && dynamic_index != shapes_.size() - 1) {
       LOG(ERROR) << "-1 appears in the wrong dimension, it can only be on the last "
                     "dimension";
@@ -47,6 +49,7 @@ StatusCode ViewLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>&
       }
     }
 
+    // 克隆输入tensor并reshape为新的形状
     std::shared_ptr<Tensor<float>> output_data = outputs.at(i);
     output_data = TensorClone(input_data);
     outputs.at(i) = output_data;
@@ -55,6 +58,7 @@ StatusCode ViewLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>&
   return StatusCode::kSuccess;
 }
 
+// 从RuntimeOperator参数创建ViewLayer实例
 StatusCode ViewLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                      std::shared_ptr<Layer<float>>& view_layer) {
   if (!op) {
@@ -82,9 +86,11 @@ StatusCode ViewLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
   return StatusCode::kSuccess;
 }
 
+// 构造函数，初始化View层并保存目标形状
 ViewLayer::ViewLayer(std::vector<int32_t> shapes)
     : NonParamLayer("view"), shapes_(std::move(shapes)) {}
 
+// 检查输入输出tensor的合法性
 StatusCode ViewLayer::Check(const std::vector<sftensor>& inputs,
                             const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {
@@ -103,6 +109,7 @@ StatusCode ViewLayer::Check(const std::vector<sftensor>& inputs,
     return StatusCode::kInferDimMismatch;
   }
 
+  // 检查shape参数的第一个维度是否与batch_size匹配（或为-1表示自动推断）
   const uint32_t batch_size = inputs.size();
   if (shapes_.empty() || (shapes_.front() != -1 && shapes_.front() != batch_size)) {
     LOG(ERROR) << "The shape parameter in the view layer has an incorrectly size! ";

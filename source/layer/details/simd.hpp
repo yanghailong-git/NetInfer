@@ -3,6 +3,7 @@
 #include "activation.hpp"
 namespace net_infer {
 namespace activation {
+// Returns a pointer to the SIMD-accelerated activation function for the requested type.
 ActivationFunc ApplySSEActivation(ActivationType act_type);
 
 }  // namespace activation
