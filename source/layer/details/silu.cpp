@@ -10,7 +10,7 @@ using namespace activation;
 StatusCode SiLULayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                               std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   using namespace activation;
-  // Delegate to the base ActivationLayer which performs the actual SiLU computation.
+  // 委托给基类 ActivationLayer 执行实际的 SiLU 计算。
   return ActivationLayer::Forward(inputs, outputs);
 }
 
@@ -20,7 +20,7 @@ StatusCode SiLULayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
     LOG(ERROR) << "The SiLU operator parameter in the layer is null pointer.";
     return StatusCode::kParseNullOperator;
   }
-  // SiLU has no parameters; simply instantiate the layer.
+  // SiLU 无参数；直接实例化该层。
   silu_layer = std::make_shared<SiLULayer>();
   return StatusCode::kSuccess;
 }

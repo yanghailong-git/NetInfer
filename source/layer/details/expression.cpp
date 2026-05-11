@@ -61,7 +61,7 @@ StatusCode ExpressionLayer::Forward(const std::vector<std::shared_ptr<Tensor<flo
       }
       op_stack.push(input_token_nodes);
     } else if (TokenIsOperator(current_token)) {
-      // process operation
+      // 处理操作
       // 操作符需要弹出两个操作数进行运算
       CHECK(op_stack.size() >= 2) << "The number of operand is less than two";
       std::shared_ptr<Tensor<float>> (*function)(const std::shared_ptr<Tensor<float>>& tensor1,

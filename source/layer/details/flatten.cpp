@@ -5,11 +5,11 @@
 
 namespace net_infer {
 
-// Constructor: initializes the flatten layer with start and end dimensions
+// 构造函数：使用起始维度和结束维度初始化展平层
 FlattenLayer::FlattenLayer(int32_t start_dim, int32_t end_dim)
     : NonParamLayer("Flatten"), start_dim_(start_dim), end_dim_(end_dim) {}
 
-// Forward pass: flattens the input tensor dimensions from start_dim to end_dim
+// 前向传播：将输入张量从 start_dim 到 end_dim 的维度展平
 StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                  std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   if (inputs.empty()) {
@@ -32,7 +32,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
   int32_t end_dim = end_dim_;
   int32_t total_dims = 4;  // NCHW
 
-  // Handle negative dimensions (e.g., -1 means last dimension)
+  // 处理负维度（例如 -1 表示最后一个维度）
   if (start_dim < 0) {
     start_dim = total_dims + start_dim;
   }
@@ -40,7 +40,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
     end_dim = total_dims + end_dim;
   }
 
-  // Validate dimension range
+  // 校验维度范围
   if (end_dim <= start_dim) {
     LOG(ERROR) << "The end dim must greater than start dim";
     return StatusCode::kInferParamError;
@@ -61,13 +61,13 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
       return StatusCode::kInferInputsEmpty;
     }
 
-    // Compute the total number of elements in the flattened range
+    // 计算展平范围内的元素总数
     std::vector<uint32_t> shapes = input->shapes();
     shapes.insert(shapes.begin(), batch_size);
     uint32_t elements_size = std::accumulate(shapes.begin() + start_dim,
                                              shapes.begin() + end_dim + 1, 1, std::multiplies());
 
-    // Clone input to output and reshape
+    // 克隆输入到输出并进行 reshape
     std::shared_ptr<Tensor<float>> output = outputs.at(i);
     output = TensorClone(input);
     CHECK(input->size() == output->size()) << "The output and input shapes of the flatten layer do "
@@ -75,16 +75,16 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
                                            << i << " th";
     outputs.at(i) = output;
 
-    // Reshape according to different flatten dimension combinations
+    // 根据不同的展平维度组合进行 reshape
     if (start_dim == 1 && end_dim == 3) {
-      // Flatten C, H, W into a single dimension
+      // 将 C、H、W 展平为单个维度
       output->Reshape({elements_size}, true);
     } else if (start_dim == 2 && end_dim == 3) {
-      // Flatten H, W, keep C
+      // 展平 H、W，保留 C
       uint32_t channels = input->channels();
       output->Reshape({channels, elements_size}, true);
     } else if (start_dim == 1 && end_dim == 2) {
-      // Flatten C, H, keep W
+      // 展平 C、H，保留 W
       uint32_t cols = input->cols();
       output->Reshape({elements_size, cols}, true);
     } else {
@@ -95,7 +95,7 @@ StatusCode FlattenLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>
   return StatusCode::kSuccess;
 }
 
-// Factory method: create a FlattenLayer instance from RuntimeOperator parameters
+// 工厂方法：从 RuntimeOperator 参数创建 FlattenLayer 实例
 StatusCode FlattenLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                         std::shared_ptr<Layer<float>>& flatten_layer) {
   if (!op) {
@@ -131,7 +131,7 @@ StatusCode FlattenLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& 
   return StatusCode::kSuccess;
 }
 
-// Register the flatten layer (corresponds to torch.flatten)
+// 注册展平层（对应 torch.flatten）
 LayerRegistererWrapper kFlattenCreateInstance(FlattenLayer::CreateInstance, "torch.flatten");
 
 }  // namespace net_infer

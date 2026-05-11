@@ -5,10 +5,10 @@
 #include "status_code.hpp"
 namespace net_infer {
 namespace activation {
-/// Type alias for an activation function that operates on two tensors (input and output).
+/// 激活函数的类型别名，作用于两个张量（输入和输出）。
 using ActivationFunc = std::function<void(sftensor, sftensor)>;
 
-/// Enumeration of supported activation function types.
+/// 支持的激活函数类型枚举。
 enum class ActivationType {
   kActivatetionUnknown = -1,
   kActivationRelu = 0,
@@ -19,20 +19,20 @@ enum class ActivationType {
   kActivationRelu6 = 5,
 };
 
-/// Converts an ActivationType enum value to its corresponding string representation.
+/// 将 ActivationType 枚举值转换为其对应的字符串表示。
 std::string ActivationTypeToString(ActivationType type);
 
-/// Activation layer that applies a non-linear activation function element-wise.
-/// This layer has no trainable parameters and supports multiple activation types.
+/// 激活层，逐元素应用非线性激活函数。
+/// 该层无可训练参数，支持多种激活类型。
 class ActivationLayer : public NonParamLayer {
  public:
   explicit ActivationLayer(activation::ActivationType type, std::string layer_name);
 
-  /// Validates input and output tensors before forward inference.
+  /// 在前向推理前校验输入和输出张量。
   StatusCode Check(const std::vector<sftensor>& inputs,
                    const std::vector<sftensor>& outputs) override;
 
-  /// Applies the configured activation function to each input tensor in the batch.
+  /// 将配置的激活函数应用于批次中的每个输入张量。
   StatusCode Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) override;
 

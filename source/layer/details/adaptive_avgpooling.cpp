@@ -10,8 +10,8 @@ AdaptiveAveragePoolingLayer::AdaptiveAveragePoolingLayer(uint32_t output_h, uint
   CHECK_GT(output_w_, 0);
 }
 
-/// Forward pass: for each input tensor, computes the adaptive average pooling to produce a fixed-size output.
-/// The stride and pooling window sizes are derived from the ratio of input size to output size.
+/// 前向传播：对每个输入张量计算自适应平均池化，生成固定尺寸的输出。
+/// 步长和池化窗口大小由输入尺寸与输出尺寸的比例推导得出。
 StatusCode AdaptiveAveragePoolingLayer::Forward(
     const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
     std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
@@ -28,14 +28,14 @@ StatusCode AdaptiveAveragePoolingLayer::Forward(
     const uint32_t input_h = input_data->rows();
     const uint32_t input_w = input_data->cols();
     const uint32_t input_c = input_data->channels();
-    // Compute stride by dividing input size by output size.
+    // 通过输入尺寸除以输出尺寸计算步长。
     const uint32_t stride_h = uint32_t(std::floor(input_h / output_h_));
     const uint32_t stride_w = uint32_t(std::floor(input_w / output_w_));
     CHECK(stride_w > 0 && stride_h > 0)
         << "The stride parameter is set incorrectly. It must always be greater "
            "than 0";
 
-    // Compute the actual pooling window size based on stride and output size.
+    // 根据步长和输出尺寸计算实际的池化窗口大小。
     const uint32_t pooling_h = (int32_t)input_h - (int32_t(output_h_) - 1) * int32_t(stride_h);
     const uint32_t pooling_w = (int32_t)input_w - (int32_t(output_w_) - 1) * int32_t(stride_w);
 
@@ -55,7 +55,7 @@ StatusCode AdaptiveAveragePoolingLayer::Forward(
            "incorrectly sized tensor "
         << i << "th";
 
-    // Iterate over each channel and compute the average value for each pooling region.
+    // 遍历每个通道，计算每个池化区域的平均值。
     const uint32_t pooling_size = pooling_h * pooling_w;
     for (uint32_t ic = 0; ic < input_c; ++ic) {
       const arma::fmat& input_channel = input_data->slice(ic);
@@ -66,7 +66,7 @@ StatusCode AdaptiveAveragePoolingLayer::Forward(
           float mean_value = 0.f;
           uint32_t output_row = uint32_t(r / stride_h);
           float* output_channel_ptr = output_channel.colptr(output_col);
-          // Accumulate all values within the pooling window.
+          // 累加池化窗口内的所有值。
           for (uint32_t w = 0; w < pooling_w; ++w) {
             const float* col_ptr = input_channel.colptr(c + w) + r;
             for (uint32_t h = 0; h < pooling_h; ++h) {
@@ -74,7 +74,7 @@ StatusCode AdaptiveAveragePoolingLayer::Forward(
               mean_value = mean_value + current_value;
             }
           }
-          // Store the mean value into the output tensor.
+          // 将平均值存入输出张量。
           *(output_channel_ptr + output_row) = mean_value / float(pooling_size);
         }
       }
@@ -83,8 +83,8 @@ StatusCode AdaptiveAveragePoolingLayer::Forward(
   return StatusCode::kSuccess;
 }
 
-/// Parses runtime operator parameters to create an AdaptiveAveragePoolingLayer instance.
-/// Expects "output_size" parameter to be a 2-D integer array [output_h, output_w].
+/// 解析运行时算子参数以创建 AdaptiveAveragePoolingLayer 实例。
+/// 期望 "output_size" 参数为二维整数数组 [output_h, output_w]。
 StatusCode AdaptiveAveragePoolingLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                                        std::shared_ptr<Layer<float>>& avg_layer) {
   if (!op) {
@@ -115,7 +115,7 @@ StatusCode AdaptiveAveragePoolingLayer::CreateInstance(const std::shared_ptr<Run
   return StatusCode::kSuccess;
 }
 
-/// Validates that inputs and outputs are non-empty, have matching batch sizes, and contain valid tensors.
+/// 校验输入和输出是否非空、批次大小是否匹配，并包含有效的张量。
 StatusCode AdaptiveAveragePoolingLayer::Check(const std::vector<sftensor>& inputs,
                                               const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {

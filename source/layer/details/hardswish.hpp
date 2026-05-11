@@ -5,20 +5,20 @@
 
 namespace net_infer {
 
-// Hard Swish activation layer
-// Computes the hard swish activation: x * max(0, min(1, (x + 3) / 6))
-// Combines the hard sigmoid with a multiplication by the input for better mobile performance
-// Corresponds to PyTorch's nn.Hardswish
+// Hard Swish 激活层
+// 计算 hard swish 激活：x * max(0, min(1, (x + 3) / 6))
+// 将 hard sigmoid 与输入相乘，以获得更好的移动端性能
+// 对应 PyTorch 的 nn.Hardswish
 class HardSwishLayer : public activation::ActivationLayer {
  public:
-  // Constructor: initializes the hard swish activation layer
+  // 构造函数：初始化 hard swish 激活层
   explicit HardSwishLayer();
 
-  // Forward pass: applies hard swish activation to each element of the input tensors
+  // 前向传播：对输入张量的每个元素应用 hard swish 激活
   StatusCode Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) override;
 
-  // Factory method: creates a HardSwishLayer from a RuntimeOperator
+  // 工厂方法：从 RuntimeOperator 创建 HardSwishLayer
   static StatusCode CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                    std::shared_ptr<Layer<float>>& hardswish_layer);
 };

@@ -11,7 +11,7 @@ SigmoidLayer::SigmoidLayer() : ActivationLayer(ActivationType::kActivationSigmoi
 StatusCode SigmoidLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                  std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   using namespace activation;
-  // Delegate to the base ActivationLayer which performs the actual sigmoid computation.
+  // 委托给基类 ActivationLayer 执行实际的 sigmoid 计算。
   return ActivationLayer::Forward(inputs, outputs);
 }
 
@@ -21,7 +21,7 @@ StatusCode SigmoidLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& 
     LOG(ERROR) << "The sigmoid operator parameter in the layer is null pointer.";
     return StatusCode::kParseNullOperator;
   }
-  // Sigmoid has no parameters; simply instantiate the layer.
+  // Sigmoid 无参数；直接实例化该层。
   sigmoid_layer = std::make_shared<SigmoidLayer>();
   return StatusCode::kSuccess;
 }

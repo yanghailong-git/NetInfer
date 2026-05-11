@@ -5,7 +5,7 @@
 #include "status_code.hpp"
 namespace net_infer {
 
-/// Constructor that initializes convolution parameters, validates dimensions, and allocates weight/bias tensors.
+/// 构造函数：初始化卷积参数，校验维度，并分配权重/偏置张量。
 BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_channel,
                                            uint32_t in_channel, uint32_t kernel_h,
                                            uint32_t kernel_w, uint32_t padding_h,
@@ -25,7 +25,7 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
       output_padding_w_(output_padding_w),
       dilation_h_(dilation_h),
       dilation_w_(dilation_w) {
-  // Adjust input channels per group when using grouped convolution.
+  // 使用分组卷积时，按组调整输入通道数。
   if (groups != 1) {
     in_channel /= groups;
   }
@@ -38,12 +38,12 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
   CHECK_GT(dilation_h_, 0);
   CHECK_GT(dilation_w_, 0);
 
-  // Regular convolution does not support output padding.
+  // 常规卷积不支持输出填充。
   if (conv_type_ == ConvType::kOpConv) {
     CHECK_EQ(output_padding_h_, 0);
     CHECK_EQ(output_padding_w_, 0);
   } else if (conv_type_ == ConvType::kOpDeconv) {
-    // Adjust kernel size to account for dilation in transposed convolution.
+    // 在转置卷积中根据空洞率调整卷积核大小。
     if (dilation_h > 1) kernel_h = (kernel_h - 1) * (dilation_h_ - 1) + kernel_h;
     if (dilation_w > 1) kernel_w = (kernel_w - 1) * (dilation_w_ - 1) + kernel_w;
   } else {
@@ -60,7 +60,7 @@ BaseConvolutionLayer::BaseConvolutionLayer(ConvType conv_type, uint32_t output_c
 
 void BaseConvolutionLayer::InitIm2ColWeight() {}
 
-/// Adds the bias value at the specified index to the entire output matrix.
+/// 将指定索引处的偏置值加到整个输出矩阵上。
 void BaseConvolutionLayer::AddBias(arma::fmat& output, uint32_t bias_index) const {
   if (!this->bias_.empty() && this->use_bias_) {
     std::shared_ptr<Tensor<float>> bias;
@@ -74,7 +74,7 @@ void BaseConvolutionLayer::AddBias(arma::fmat& output, uint32_t bias_index) cons
   }
 }
 
-/// Forward pass: iterates over the batch and groups, computing the convolution output for each sample.
+/// 前向传播：遍历批次和分组，为每个样本计算卷积输出。
 StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                          std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   StatusCode check_code = Check(inputs, outputs);
@@ -87,7 +87,7 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
   const uint32_t kernel_w = this->weights_.at(0)->cols();
   const uint32_t kernel_channel = this->weights_.at(0)->channels();
 
-  // Lazily initialize im2col weight matrices if not already done.
+  // 若尚未初始化，则延迟初始化 im2col 权重矩阵。
   if (kernel_matrix_arr_.size() != kernel_count) {
     InitIm2ColWeight();
   }
@@ -120,7 +120,7 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
            "incorrectly sized tensor "
         << i << "th";
 
-    // Process each group independently; parallelize only when groups > 1 to avoid overhead.
+    // 独立处理每个分组；仅当分组数大于 1 时启用并行，以避免额外开销。
 #pragma omp parallel for if (groups_ > 1)
     for (uint32_t group = 0; group < groups_; ++group) {
       if (groups_ != 1) {
@@ -137,8 +137,8 @@ StatusCode BaseConvolutionLayer::Forward(const std::vector<std::shared_ptr<Tenso
   return StatusCode::kSuccess;
 }
 
-/// Parses a runtime operator to create either a ConvolutionLayer or DeconvolutionLayer.
-/// Reads parameters such as dilation, channels, padding, stride, kernel_size, groups, bias, etc.
+/// 解析运行时算子以创建 ConvolutionLayer 或 DeconvolutionLayer。
+/// 读取空洞率、通道数、填充、步长、卷积核大小、分组、偏置等参数。
 StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                                 std::shared_ptr<Layer<float>>& conv_layer) {
   if (!op) {
@@ -228,7 +228,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
     return StatusCode::kParseParamError;
   }
 
-  // Verify padding mode for standard Conv2d; only "zeros" is supported.
+  // 校验标准 Conv2d 的填充模式；仅支持 "zeros"。
   if (op->type == "nn.Conv2d") {
     if (op->has_parameter("padding_mode")) {
       auto padding_mode =
@@ -299,7 +299,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
     }
   }
 
-  // Determine convolution type from operator name.
+  // 根据算子名称确定卷积类型。
   ConvType conv_type = ConvType::kOpConv;
   if (op->type == "nn.Conv2d") {
     conv_type = ConvType::kOpConv;
@@ -322,7 +322,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
         output_padding_h, output_padding_w, dilation_h, dilation_w);
   }
 
-  // Load weights
+  // 加载权重
   const std::map<std::string, std::shared_ptr<RuntimeAttribute>>& attrs = op->attribute;
   if (use_bias->value) {
     if (!op->has_attribute("bias")) {
@@ -362,7 +362,7 @@ StatusCode BaseConvolutionLayer::CreateInstance(const std::shared_ptr<RuntimeOpe
   return StatusCode::kSuccess;
 }
 
-/// Validates input/output sizes, kernel dimensions, bias consistency, stride/dilation validity, and group constraints.
+/// 校验输入/输出尺寸、卷积核维度、偏置一致性、步长/空洞率有效性及分组约束。
 StatusCode BaseConvolutionLayer::Check(const std::vector<sftensor>& inputs,
                                        const std::vector<sftensor>& outputs) {
   if (inputs.empty()) {
@@ -442,7 +442,7 @@ StatusCode BaseConvolutionLayer::Check(const std::vector<sftensor>& inputs,
     return StatusCode::kInferParamError;
   }
 
-  // Ensure all kernels have uniform dimensions.
+  // 确保所有卷积核具有统一的维度。
   for (uint32_t k = 0; k < kernel_count; ++k) {
     const std::shared_ptr<Tensor<float>>& kernel = this->weights_.at(k);
     if (kernel->rows() != kernel_h) {

@@ -6,25 +6,25 @@
 
 namespace net_infer {
 
-/// Batch Normalization layer for 2D feature maps (NCHW format).
-/// Applies per-channel normalization using running mean and variance, followed by affine transformation.
+/// 二维特征图的批归一化层（NCHW 格式）。
+/// 使用运行均值和方差对每个通道进行归一化，随后执行仿射变换。
 class BatchNorm2dLayer : public ParamLayer {
  public:
   explicit BatchNorm2dLayer(uint32_t num_features, float eps, std::vector<float> affine_weight,
                             std::vector<float> affine_bias);
 
-  /// Forward pass: normalizes each channel of the input and applies the learned affine scale and shift.
+  /// 前向传播：对输入的每个通道进行归一化，并应用学习到的仿射缩放和平移。
   StatusCode Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) override;
 
-  /// Factory method to construct a BatchNorm2dLayer from a runtime operator.
+  /// 工厂方法，从运行时算子构造 BatchNorm2dLayer。
   static StatusCode CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                    std::shared_ptr<Layer<float>>& batch_layer);
 
  private:
-  float eps_ = 1e-5f;              ///< Small constant added to variance for numerical stability.
-  std::vector<float> affine_weight_;  ///< Per-channel gamma (scale) parameters.
-  std::vector<float> affine_bias_;    ///< Per-channel beta (shift) parameters.
+  float eps_ = 1e-5f;              ///< 加到方差上的小常数，用于数值稳定性。
+  std::vector<float> affine_weight_;  ///< 每个通道的 gamma（缩放）参数。
+  std::vector<float> affine_bias_;    ///< 每个通道的 beta（平移）参数。
 };
 }  // namespace net_infer
 

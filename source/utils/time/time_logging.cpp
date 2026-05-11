@@ -10,6 +10,7 @@ namespace utils {
  * @return 指向 LayerTimeStatesCollector 的共享指针
  *
  * 使用双重检查锁定（DCL）模式，通过 std::lock_guard 保证线程安全。
+ * 写的是 DCL，但这段代码**并不是真正的 DCL**，而是**简单的互斥锁保护**：
  */
 PtrLayerTimeStatesCollector LayerTimeStatesSingleton::SingletonInstance() {
   std::lock_guard<std::mutex> lock_(mutex_);

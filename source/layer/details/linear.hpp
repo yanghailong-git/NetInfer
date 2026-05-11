@@ -5,39 +5,39 @@
 
 namespace net_infer {
 
-// Linear (fully connected) layer
-// Computes the linear transformation: y = xW^T + b
-// Corresponds to PyTorch's nn.Linear
+// Linear（全连接）层
+// 计算线性变换：y = xW^T + b
+// 对应 PyTorch 的 nn.Linear
 class LinearLayer : public ParamLayer {
  public:
   //  explicit LinearLayer(uint32_t batch, uint32_t in_channel, uint32_t in_dim, uint32_t out_dim,
   //  bool use_bias = true);
 
-  // Constructor: initializes the linear layer with input/output feature dimensions
+  // 构造函数：根据输入/输出特征维度初始化线性层
   explicit LinearLayer(int32_t in_features, int32_t out_features, bool use_bias);
 
-  // Validates input, output, weight, and bias tensors
+  // 校验输入、输出、权重和偏置张量
   StatusCode Check(const std::vector<sftensor>& inputs,
                    const std::vector<sftensor>& outputs) override;
 
-  // Forward pass: computes linear transformation for each input tensor
+  // 前向传播：对每个输入张量计算线性变换
   StatusCode Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) override;
 
-  // Factory method: creates a LinearLayer from a RuntimeOperator
+  // 工厂方法：从 RuntimeOperator 创建 LinearLayer
   static StatusCode CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                    std::shared_ptr<Layer<float>>& linear_layer);
 
-  // Sets weights from a flat float vector
+  // 从一维浮点向量设置权重
   void set_weights(const std::vector<float>& weights) override;
 
-  // Sets weights from a vector of tensors (delegates to base class)
+  // 从张量向量设置权重（委托给基类）
   void set_weights(const std::vector<std::shared_ptr<Tensor<float>>>& weights) override;
 
  private:
-  int32_t in_features_ = 0;   // Number of input features
-  int32_t out_features_ = 0;  // Number of output features
-  bool use_bias_ = false;     // Whether to use bias
+  int32_t in_features_ = 0;   // 输入特征数
+  int32_t out_features_ = 0;  // 输出特征数
+  bool use_bias_ = false;     // 是否使用偏置
 };
 }  // namespace net_infer
 

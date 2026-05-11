@@ -5,19 +5,19 @@
 namespace net_infer {
 using namespace activation;
 
-// Constructor: initializes the hard swish activation layer
-// Hard swish formula: x * max(0, min(1, (x + 3) / 6))
+// 构造函数：初始化 Hard Swish 激活层
+// Hard Swish 公式：x * max(0, min(1, (x + 3) / 6))
 HardSwishLayer::HardSwishLayer()
     : ActivationLayer(ActivationType::kActivationHardSwish, "HardSwish") {}
 
-// Forward pass: delegates to the base ActivationLayer's forward implementation
+// 前向传播：委托给基类 ActivationLayer 的前向实现
 StatusCode HardSwishLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                    std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   using namespace activation;
   return ActivationLayer::Forward(inputs, outputs);
 }
 
-// Factory method: creates a HardSwishLayer instance
+// 工厂方法：创建 HardSwishLayer 实例
 StatusCode HardSwishLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                           std::shared_ptr<Layer<float>>& hardswish_layer) {
   if (!op) {
@@ -28,7 +28,7 @@ StatusCode HardSwishLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>
   return StatusCode::kSuccess;
 }
 
-// Register the hard swish layer (corresponds to PyTorch's nn.Hardswish)
+// 注册 Hard Swish 层（对应 PyTorch 的 nn.Hardswish）
 LayerRegistererWrapper kHardSwishCreateInstance(HardSwishLayer::CreateInstance, "nn.Hardswish");
 
 }  // namespace net_infer

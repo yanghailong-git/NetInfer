@@ -7,7 +7,7 @@ using namespace activation;
 
 StatusCode Relu6Layer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
-  // Delegate to the base ActivationLayer which performs the actual ReLU6 computation.
+  // 委托给基类 ActivationLayer 执行实际的 ReLU6 计算。
   return ActivationLayer::Forward(inputs, outputs);
 }
 
@@ -18,7 +18,7 @@ StatusCode Relu6Layer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op
     return StatusCode::kParseNullOperator;
   }
 
-  // ReLU6 has no parameters; simply instantiate the layer.
+  // ReLU6 无参数；直接实例化该层。
   relu_layer = std::make_shared<Relu6Layer>();
   return StatusCode::kSuccess;
 }

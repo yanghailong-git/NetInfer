@@ -5,29 +5,29 @@
 namespace net_infer {
 
 /**
- * @brief ReLU (Rectified Linear Unit) activation layer.
+ * @brief ReLU（修正线性单元）激活层。
  *
- * Applies the element-wise ReLU function: f(x) = max(0, x).
- * Delegates the actual computation to the base ActivationLayer.
+ * 逐元素应用 ReLU 函数：f(x) = max(0, x)。
+ * 实际计算委托给基类 ActivationLayer。
  */
 class ReluLayer : public activation::ActivationLayer {
  public:
   explicit ReluLayer();
 
   /**
-   * @brief Forward pass: apply ReLU activation to each input tensor.
-   * @param inputs Input tensor batch.
-   * @param outputs Output tensor batch.
-   * @return Status code indicating success or failure.
+   * @brief 前向传播：对每个输入张量应用 ReLU 激活。
+   * @param inputs 输入张量批次。
+   * @param outputs 输出张量批次。
+   * @return 表示成功或失败的状态码。
    */
   StatusCode Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) override;
 
   /**
-   * @brief Factory method to create a ReluLayer from runtime operator parameters.
-   * @param op Runtime operator (unused for stateless ReLU).
-   * @param relu_layer Output layer pointer to be assigned.
-   * @return Status code indicating success or failure.
+   * @brief 工厂方法，根据运行时算子参数创建 ReluLayer。
+   * @param op 运行时算子（对无状态的 ReLU 不使用）。
+   * @param relu_layer 待赋值的输出层指针。
+   * @return 表示成功或失败的状态码。
    */
   static StatusCode CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                    std::shared_ptr<Layer<float>>& relu_layer);

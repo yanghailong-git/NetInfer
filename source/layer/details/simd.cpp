@@ -7,8 +7,8 @@ namespace net_infer {
 
 namespace activation {
 
-// Computes the sigmoid activation function element-wise using SIMD (AVX2/SSE)
-// for the whole tensor, followed by a scalar fallback for any remaining elements.
+// 使用 SIMD (AVX2/SSE) 对整个 tensor 逐元素计算 sigmoid 激活函数，
+// 对剩余元素使用标量回退。
 static void SigmoidSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -19,7 +19,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   const float* in_ptr = input->raw_ptr();
   float* out_ptr = output->raw_ptr();
 #ifdef __AVX2__
-  // AVX2 processes 8 floats per iteration.
+  // AVX2 每次迭代处理 8 个 float。
   packet_size = 8;
   __m256 one = _mm256_set1_ps(1.f);
   __m256 zero = _mm256_setzero_ps();
@@ -31,7 +31,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
     out_ptr += packet_size;
   }
 #ifdef __SSE2__
-  // SSE2 processes 4 floats per iteration for the remaining elements.
+  // SSE2 对剩余元素每次迭代处理 4 个 float。
   packet_size = 4;
   __m128 one128 = _mm_set1_ps(1.f);
   __m128 zero128 = _mm_setzero_ps();
@@ -44,7 +44,7 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the tail elements that do not fill a SIMD packet.
+  // 对无法填满 SIMD 数据包的尾部元素使用标量回退。
   if (index < in_size) {
     while (index < in_size) {
       float value = input->index(index);
@@ -54,8 +54,8 @@ static void SigmoidSSE(sftensor input, sftensor output) {
   }
 }
 
-// Computes the ReLU activation function element-wise using SIMD (AVX2/SSE):
-// output = max(0, input).
+// 使用 SIMD (AVX2/SSE) 逐元素计算 ReLU 激活函数：
+// output = max(0, input)。
 static void ReluSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -87,7 +87,7 @@ static void ReluSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the remaining elements.
+  // 对剩余元素使用标量回退。
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -97,8 +97,8 @@ static void ReluSSE(sftensor input, sftensor output) {
   }
 }
 
-// Computes the ReLU6 activation function element-wise using SIMD (AVX2/SSE):
-// output = min(max(0, input), 6).
+// 使用 SIMD (AVX2/SSE) 逐元素计算 ReLU6 激活函数：
+// output = min(max(0, input), 6)。
 static void Relu6SSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -133,7 +133,7 @@ static void Relu6SSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the remaining elements.
+  // 对剩余元素使用标量回退。
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -143,8 +143,8 @@ static void Relu6SSE(sftensor input, sftensor output) {
   }
 }
 
-// Computes the SiLU (Sigmoid Linear Unit) activation function element-wise using SIMD:
-// output = input / (1 + exp(-input)).
+// 使用 SIMD 逐元素计算 SiLU (Sigmoid Linear Unit) 激活函数：
+// output = input / (1 + exp(-input))。
 static void SiluSSE(sftensor input, sftensor output) {
   CHECK(input != nullptr && output != nullptr) << "The input or output tensor is empty.";
   CHECK(!input->empty() && !output->empty()) << "The input or output tensor is empty.";
@@ -180,7 +180,7 @@ static void SiluSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the remaining elements.
+  // 对剩余元素使用标量回退。
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -190,7 +190,7 @@ static void SiluSSE(sftensor input, sftensor output) {
   }
 }
 
-// Computes the HardSwish activation function element-wise using SIMD:
+// 使用 SIMD 逐元素计算 HardSwish 激活函数：
 //   0                         if x <= -3
 //   x                         if x >= 3
 //   x * (x + 3) / 6           otherwise
@@ -215,13 +215,13 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   for (index = 0; index <= size - packet_size; index += packet_size) {
     __m256 x = _mm256_loadu_ps(in_ptr);
 
-    // Build masks for the three piece-wise branches.
+    // 为三个分段分支构建掩码。
     __m256 le_branch = _mm256_cmp_ps(x, minus_three, _CMP_LE_OS);  // <= -3
     __m256 ge_branch = _mm256_cmp_ps(x, three, _CMP_GE_OS);        // >= 3
     __m256 mid_branch = _mm256_and_ps(_mm256_cmp_ps(x, minus_three, _CMP_GT_OS),
                                       _mm256_cmp_ps(x, three, _CMP_LT_OS));  // -3 < x < 3
 
-    // Compute each branch and mask out the inactive lanes.
+    // 计算每个分支并屏蔽非活动的通道。
     __m256 f1 = _mm256_and_ps(zero, le_branch);
     __m256 f2 = _mm256_and_ps(x, ge_branch);
     __m256 f3 =
@@ -259,7 +259,7 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the tail elements.
+  // 对尾部元素使用标量回退。
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -277,7 +277,7 @@ static void HardSwishSSE(sftensor input, sftensor output) {
   }
 }
 
-// Computes the HardSigmoid activation function element-wise using SIMD:
+// 使用 SIMD 逐元素计算 HardSigmoid 激活函数：
 //   0                         if x <= -3
 //   1                         if x >= 3
 //   x / 6 + 0.5               otherwise
@@ -347,7 +347,7 @@ static void HardSigmoidSSE(sftensor input, sftensor output) {
   }
 #endif
 #endif
-  // Scalar fallback for the tail elements.
+  // 对尾部元素使用标量回退。
   if (index < size) {
     while (index < size) {
       float value = input->index(index);
@@ -365,7 +365,7 @@ static void HardSigmoidSSE(sftensor input, sftensor output) {
   }
 }
 
-// Returns the SIMD-accelerated activation function corresponding to the given type.
+// 返回与给定类型对应的 SIMD 加速激活函数。
 ActivationFunc ApplySSEActivation(ActivationType act_type) {
   ActivationFunc function;
   switch (act_type) {

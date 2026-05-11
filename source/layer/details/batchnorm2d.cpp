@@ -4,8 +4,8 @@
 
 namespace net_infer {
 
-/// Forward pass: normalizes each channel of every input tensor using running mean and variance,
-/// then applies the affine transformation (gamma * x + beta).
+/// 前向传播：使用滑动均值和方差对每个输入张量的各通道进行归一化，
+/// 然后应用仿射变换（gamma * x + beta）。
 StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<float>>>& inputs,
                                      std::vector<std::shared_ptr<Tensor<float>>>& outputs) {
   if (inputs.empty()) {
@@ -24,7 +24,7 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
     return StatusCode::kInferDimMismatch;
   }
 
-  // Verify consistency between mean, variance, gamma, and beta parameter counts.
+  // 校验均值、方差、gamma 和 beta 参数数量的一致性。
   const uint32_t mean_value_size = this->weights_.size();
   const uint32_t bias_value_size = this->bias_.size();
   if (mean_value_size != bias_value_size) {
@@ -64,7 +64,7 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
            "layer do not match "
         << b << " th";
 
-    // Apply batch normalization channel by channel.
+    // 逐通道执行批归一化。
     for (uint32_t i = 0; i < mean_value_size; ++i) {
       CHECK(weights_.at(i)->size() == 1 && bias_.at(i)->size() == 1);
       const float mean_value = weights_.at(i)->index(0);
@@ -79,8 +79,8 @@ StatusCode BatchNorm2dLayer::Forward(const std::vector<std::shared_ptr<Tensor<fl
   return StatusCode::kSuccess;
 }
 
-/// Parses runtime operator parameters and attributes to instantiate a BatchNorm2dLayer.
-/// Loads running_mean, running_var, weight (gamma), and bias (beta).
+/// 解析运行时算子参数和属性以实例化 BatchNorm2dLayer。
+/// 加载 running_mean、running_var、weight（gamma）和 bias（beta）。
 StatusCode BatchNorm2dLayer::CreateInstance(const std::shared_ptr<RuntimeOperator>& op,
                                             std::shared_ptr<Layer<float>>& batch_layer) {
   if (!op) {
@@ -116,7 +116,7 @@ StatusCode BatchNorm2dLayer::CreateInstance(const std::shared_ptr<RuntimeOperato
     return StatusCode::kParseParamError;
   }
 
-  // Load weights and running statistics from attributes.
+  // 从属性中加载权重和滑动统计量。
   const auto& attrs = op->attribute;
   CHECK(!attrs.empty()) << "Operator attributes is empty";
 
