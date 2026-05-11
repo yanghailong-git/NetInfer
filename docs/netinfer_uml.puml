@@ -1,0 +1,439 @@
+@startuml NetInfer_UML
+
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor<<abstract>> LightYellow
+    BackgroundColor<<alias>> LightGray
+    BackgroundColor<<enum>> LightGreen
+    BackgroundColor<<struct>> LightBlue
+    BorderColor Black
+    ArrowColor Black
+}
+
+title NetInfer 推理引擎 — 核心 UML 类图
+
+' ==================== 枚举 ====================
+enum StatusCode <<enum>> {
+    kUnknownCode = -1
+    kSuccess = 0
+    kInferInputsEmpty
+    kInferOutputsEmpty
+    kInferParamError
+    kInferDimMismatch
+    kFunctionNotImplement
+    kParseWeightError
+    kParseParamError
+    kParseNullOperator
+}
+
+enum RuntimeDataType <<enum>> {
+    kTypeUnknown = 0
+    kTypeFloat32 = 1
+    kTypeFloat64 = 2
+    kTypeFloat16 = 3
+    kTypeInt32 = 4
+    kTypeInt64 = 5
+    kTypeInt16 = 6
+    kTypeInt8 = 7
+    kTypeUInt8 = 8
+}
+
+enum RuntimeParameterType <<enum>> {
+    kParameterUnknown = 0
+    kParameterBool = 1
+    kParameterInt = 2
+    kParameterFloat = 3
+    kParameterString = 4
+    kParameterIntArray = 5
+    kParameterFloatArray = 6
+    kParameterStringArray = 7
+}
+
+enum RuntimeGraph::GraphState <<enum>> {
+    NeedInit = -2
+    NeedBuild = -1
+    Complete = 0
+}
+
+' ==================== 数据层 ====================
+class Tensor<T> <<struct>> {
+    - raw_shapes_: vector<uint32_t>
+    - data_: Cube<T>
+    --
+    + Tensor(c, h, w)
+    + channels(): uint32_t
+    + rows(): uint32_t
+    + cols(): uint32_t
+    + size(): uint32_t
+    + data(): Cube<T>
+    + slice(index): Mat<T>
+    + raw_ptr(): T*
+    + raw_ptr(offset): T*
+    + shapes(): vector<uint32_t>
+    + values(): vector<T>
+    + Fill(values, row_major): void
+    + at(batch, row, col): T
+    + index(offset): T
+    + empty(): bool
+}
+
+class RuntimeOperandBase<T> <<struct>> {
+    + name: string
+    + shapes: vector<int32_t>
+    + datas: vector<shared_ptr<Tensor<T>>>
+    + type: RuntimeDataType
+    + size(): size_t
+}
+
+class RuntimeAttribute <<struct>> {
+    + weight_data: vector<char>
+    + shape: vector<int32_t>
+    + type: RuntimeDataType
+    + get<T>(need_clear_weight): vector<T>
+}
+
+' ==================== 运行时参数 ====================
+class RuntimeParameter <<struct>> {
+    + type: RuntimeParameterType
+}
+
+class RuntimeParameterInt <<struct>> {
+    + value: int32_t
+}
+
+class RuntimeParameterFloat <<struct>> {
+    + value: float
+}
+
+class RuntimeParameterString <<struct>> {
+    + value: string
+}
+
+class RuntimeParameterBool <<struct>> {
+    + value: bool
+}
+
+class RuntimeParameterIntArray <<struct>> {
+    + value: vector<int32_t>
+}
+
+class RuntimeParameterFloatArray <<struct>> {
+    + value: vector<float>
+}
+
+class RuntimeParameterStringArray <<struct>> {
+    + value: vector<string>
+}
+
+' ==================== PNNX 解析层 ====================
+class pnnx::Graph <<struct>> {
+    + ops: vector<Operator*>
+    + operands: vector<Operand*>
+    + load(param, bin): int
+}
+
+class pnnx::Operator <<struct>> {
+    + name: string
+    + type: string
+    + inputs: vector<Operand*>
+    + outputs: vector<Operand*>
+    + params: map<string, Parameter>
+    + attrs: map<string, Attribute>
+}
+
+class pnnx::Operand <<struct>> {
+    + name: string
+    + shape: vector<int>
+    + type: int
+    + producer: Operator*
+    + consumers: vector<Operator*>
+}
+
+class pnnx::Parameter <<struct>> {
+    + type: int
+    + b: bool
+    + i: int
+    + f: float
+    + s: string
+    + ai: vector<int>
+    + af: vector<float>
+    + as: vector<string>
+}
+
+class pnnx::Attribute <<struct>> {
+    + type: int
+    + shape: vector<int>
+    + data: vector<char>
+}
+
+' ==================== 算子层 ====================
+class Layer<float> <<abstract>> {
+    # layer_name_: string
+    # runtime_operator_: weak_ptr<RuntimeOperator>
+    --
+    + Layer(layer_name)
+    + {virtual} Forward(): StatusCode
+    + {virtual} Forward(inputs, outputs): StatusCode
+    + {virtual} Check(inputs, outputs): StatusCode
+    + {virtual} weights(): vector<shared_ptr<Tensor>>&
+    + {virtual} bias(): vector<shared_ptr<Tensor>>&
+    + {virtual} set_weights(weights): void
+    + {virtual} set_bias(bias): void
+    + layer_name(): string
+    + set_runtime_operator(op): void
+}
+
+class ParamLayer <<abstract>> {
+    --
+    + ParamLayer(name)
+    + InitWeightParam(cnt, ch, h, w): void
+    + InitBiasParam(cnt, ch, h, w): void
+    + weights() override
+    + bias() override
+    + set_weights(weights) override
+    + set_bias(bias) override
+    + weight(index): shared_ptr<Tensor>
+    # weights_: vector<shared_ptr<Tensor>>
+    # bias_: vector<shared_ptr<Tensor>>
+}
+
+class BaseConvolutionLayer <<abstract>> {
+    + use_bias(): bool
+    + padding_h(): uint32_t
+    + padding_w(): uint32_t
+    + stride_h(): uint32_t
+    + stride_w(): uint32_t
+    + dilation_h(): uint32_t
+    + dilation_w(): uint32_t
+    + groups(): uint32_t
+    + out_channels(): uint32_t
+    + in_channels(): uint32_t
+    + kernel_h(): uint32_t
+    + kernel_w(): uint32_t
+}
+
+class ConvolutionLayer {
+    + Forward(): StatusCode
+    + Is1x1KernelNoPadding(): bool
+    + InitIm2ColWeight(): void
+    + ComputeOutput(inputs, outputs): void
+    + ComputeOutputSize(): uint32_t
+    + ConvGEMMBias()
+    + ConvIm2Col()
+}
+
+class DeconvolutionLayer {
+    + Forward(): StatusCode
+}
+
+class LinearLayer {
+    + Forward(): StatusCode
+    + Check(inputs, outputs): StatusCode
+    + set_weights(params): void
+}
+
+class BatchNorm2dLayer {
+    + Forward(): StatusCode
+}
+
+class LLamaMatmulLayer {
+    + Forward(): StatusCode
+    + set_weights(params): void
+}
+
+class RMSNormLayer {
+    + Forward(): StatusCode
+    + set_weights(params): void
+}
+
+class ActivationLayer <<abstract>> {
+    + ActivationLayer(type)
+    + Check(inputs, outputs): StatusCode
+    + Forward(inputs, outputs): StatusCode
+}
+
+class ReluLayer
+class Relu6Layer
+class SigmoidLayer
+class SiLULayer
+class HardSigmoid
+class HardSwishLayer
+
+class SoftmaxLayer {
+    - softmax_dim_: int32_t
+    + Forward(inputs, outputs): StatusCode
+}
+
+class AdaptiveAveragePoolingLayer
+class MaxPoolingLayer
+class FlattenLayer
+class CatLayer
+class UpSampleLayer
+class ViewLayer
+class ExpressionLayer
+
+class YoloDetectLayer {
+    - stages_: int32_t
+    - num_classes_: int32_t
+    - num_anchors_: int32_t
+    - strides_: vector<float>
+    - anchor_grids_: vector<arma::fmat>
+    - grids_: vector<arma::fmat>
+    - conv_layers_: vector<shared_ptr<ConvolutionLayer>>
+    + Forward(inputs, outputs): StatusCode
+    + CreateInstance(op, layer): StatusCode
+}
+
+' ==================== 工厂 ====================
+class LayerRegisterer {
+    - {static} registry_: CreateRegistry*
+    --
+    + {static} RegisterCreator(type, creator): void
+    + {static} CreateLayer(op): shared_ptr<Layer<float>>
+    + {static} Registry(): CreateRegistry*
+    + {static} layer_types(): vector<string>
+}
+
+class LayerRegistererWrapper {
+    + LayerRegistererWrapper(func, names...)
+}
+
+' ==================== 运行时图 ====================
+class RuntimeGraph {
+    - bin_path_: string
+    - param_path_: string
+    - graph_state_: GraphState
+    - operators_: vector<shared_ptr<RuntimeOperator>>
+    - input_ops_: vector<shared_ptr<RuntimeOperator>>
+    - output_ops_: vector<shared_ptr<RuntimeOperator>>
+    - enable_memory_reuse_: bool
+    --
+    + RuntimeGraph(param, bin)
+    + Build(): void
+    + Forward(debug): void
+    + set_inputs(name, inputs): void
+    + get_outputs(name): vector<sftensor>
+    + set_enable_memory_reuse(enable): void
+    + is_input_op(name): bool
+    + is_output_op(name): bool
+    + graph_state(): GraphState
+    --
+    - Init(): bool
+    - CreateNodeRelation(): void
+    - ReverseTopoSort(): void
+    - ReverseTopoSortInternal(op, idx): void
+    - InitGraphOperatorsInput(inputs, op): void
+    - InitGraphOperatorsOutput(outputs, op): void
+    - InitGraphAttrs(attrs, op): void
+    - InitGraphParams(params, op): void
+    - CreateLayer(op): shared_ptr<Layer<T>>
+    - PropagateLayerOutputs(op, outputs): void
+}
+
+class RuntimeOperatorBase<T> <<struct>> {
+    + name: string
+    + type: string
+    + start_time: int32_t
+    + end_time: int32_t
+    + occur_end_time: int32_t
+    + has_forward: bool
+    + layer: shared_ptr<Layer<T>>
+    + output_names: vector<string>
+    + output_operands: shared_ptr<RuntimeOperandBase<T>>
+    + input_operands: map<string, shared_ptr<RuntimeOperandBase<T>>>
+    + input_operands_seq: vector<shared_ptr<RuntimeOperandBase<T>>>
+    + output_operators: map<string, shared_ptr<RuntimeOperatorBase<T>>>
+    + params: map<string, shared_ptr<RuntimeParameter>>
+    + attribute: map<string, shared_ptr<RuntimeAttribute>>
+    + has_parameter(name): bool
+    + has_attribute(name): bool
+}
+
+' ==================== 继承关系 ====================
+Layer <|-- ParamLayer
+Layer <|-- ActivationLayer
+Layer <|-- SoftmaxLayer
+Layer <|-- AdaptiveAveragePoolingLayer
+Layer <|-- MaxPoolingLayer
+Layer <|-- FlattenLayer
+Layer <|-- CatLayer
+Layer <|-- UpSampleLayer
+Layer <|-- ViewLayer
+Layer <|-- ExpressionLayer
+Layer <|-- YoloDetectLayer
+
+ParamLayer <|-- BaseConvolutionLayer
+ParamLayer <|-- LinearLayer
+ParamLayer <|-- BatchNorm2dLayer
+ParamLayer <|-- LLamaMatmulLayer
+ParamLayer <|-- RMSNormLayer
+
+BaseConvolutionLayer <|-- ConvolutionLayer
+BaseConvolutionLayer <|-- DeconvolutionLayer
+
+ActivationLayer <|-- ReluLayer
+ActivationLayer <|-- Relu6Layer
+ActivationLayer <|-- SigmoidLayer
+ActivationLayer <|-- SiLULayer
+ActivationLayer <|-- HardSigmoid
+ActivationLayer <|-- HardSwishLayer
+
+' ==================== 关联关系 ====================
+RuntimeGraph "1" *-- "n" RuntimeOperatorBase : contains >
+RuntimeGraph ..> pnnx::Graph : parses >
+RuntimeGraph ..> LayerRegisterer : creates via >
+
+RuntimeOperatorBase "1" --> "1" Layer : layer >
+RuntimeOperatorBase "1" *-- "n" RuntimeOperandBase : input/output >
+RuntimeOperatorBase "1" *-- "n" RuntimeParameter : params >
+RuntimeOperatorBase "1" *-- "n" RuntimeAttribute : attribute >
+
+RuntimeOperandBase "1" *-- "n" Tensor : datas >
+
+RuntimeParameter <|-- RuntimeParameterBool
+RuntimeParameter <|-- RuntimeParameterInt
+RuntimeParameter <|-- RuntimeParameterFloat
+RuntimeParameter <|-- RuntimeParameterString
+RuntimeParameter <|-- RuntimeParameterIntArray
+RuntimeParameter <|-- RuntimeParameterFloatArray
+RuntimeParameter <|-- RuntimeParameterStringArray
+
+RuntimeAttribute ..> RuntimeDataType : uses >
+RuntimeOperandBase ..> RuntimeDataType : uses >
+
+pnnx::Graph "1" *-- "n" pnnx::Operator : ops >
+pnnx::Graph "1" *-- "n" pnnx::Operand : operands >
+pnnx::Operator "1" --> "n" pnnx::Operand : inputs/outputs >
+pnnx::Operator "1" *-- "n" pnnx::Parameter : params >
+pnnx::Operator "1" *-- "n" pnnx::Attribute : attrs >
+
+LayerRegisterer ..> Layer : creates >
+LayerRegistererWrapper ..> LayerRegisterer : registers >
+
+Layer "1" --> "1" RuntimeOperatorBase : runtime_operator_ >
+
+StatusCode ..> Layer : return type
+StatusCode ..> RuntimeGraph : return type
+
+note right of LayerRegisterer
+    单例工厂模式
+    registry_["nn.Conv2d"] → ConvolutionLayer
+    registry_["nn.ReLU"] → ReluLayer
+    registry_["models.yolo.Detect"] → YoloDetectLayer
+end note
+
+note right of RuntimeGraph
+    图执行引擎
+    1. Init() 加载 PNNX 模型
+    2. CreateNodeRelation() 建立拓扑
+    3. ReverseTopoSort() 确定执行顺序
+    4. Forward() 按拓扑序逐层执行
+end note
+
+note bottom of YoloDetectLayer
+    直接继承 Layer<float>
+    内部包含 3 个 ConvolutionLayer
+    用于 YOLOv5 检测头
+end note
+
+@enduml
