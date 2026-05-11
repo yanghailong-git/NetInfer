@@ -109,7 +109,8 @@ static void CheckAndReshapeTensor(sftensor& output_tensor,
  */
 void RuntimeOperatorUtils<float>::InitOperatorOutput(
     const std::vector<pnnx::Operator*>& pnnx_operators,
-    const std::vector<std::shared_ptr<RuntimeOperator>>& operators) {
+    const std::vector<std::shared_ptr<RuntimeOperator>>& operators,
+    bool enable_memory_reuse) {
   CHECK(!pnnx_operators.empty() && !operators.empty() && pnnx_operators.size() == operators.size());
   CHECK(pnnx_operators.size() == operators.size());
   for (uint32_t i = 0; i < pnnx_operators.size(); ++i) {
@@ -140,38 +141,45 @@ void RuntimeOperatorUtils<float>::InitOperatorOutput(
     if (!output_tensors) {
       // 尝试复用前序算子的输出内存
       bool has_found = false;
-      for (uint32_t j = 0; j < i; ++j) {
-        if (has_found) {
-          break;
-        }
+      // NOTE: Memory reuse can be disabled to avoid use-after-free caused by
+      // shared raw memory across multiple operators. Armadillo's Cube/Mat
+      // internal state can become inconsistent when borrowed memory is reshaped
+      // or replaced in complex graphs (e.g. MobilenetV2 with residual
+      // connections).
+      if (enable_memory_reuse) {
+        for (uint32_t j = 0; j < i; ++j) {
+          if (has_found) {
+            break;
+          }
 
-        const auto& prev_runtime_op = operators.at(j);
-        if (!prev_runtime_op->output_operands || prev_runtime_op->occur_end_time != -1) {
-          continue;
-        }
+          const auto& prev_runtime_op = operators.at(j);
+          if (!prev_runtime_op->output_operands || prev_runtime_op->occur_end_time != -1) {
+            continue;
+          }
 
-        if (runtime_op->start_time > prev_runtime_op->occur_end_time) {
-          prev_runtime_op->occur_end_time = -1;
-        }
+          if (runtime_op->start_time > prev_runtime_op->occur_end_time) {
+            prev_runtime_op->occur_end_time = -1;
+          }
 
-        // 若当前算子的执行时间在前序算子生命周期结束之后，且元素总数一致，则可复用内存
-        if (runtime_op->start_time > prev_runtime_op->end_time) {
-          if (prev_runtime_op->output_operands->size() == operand_size) {
-            has_found = true;
-            const auto& prev_output_operand = prev_runtime_op->output_operands;
-            runtime_op->output_operands = std::make_shared<RuntimeOperand>(
-                prev_output_operand->name + "_output", operand_shapes, batch,
-                RuntimeDataType::kTypeFloat32);
-            const auto& prev_runtime_op_tensors = prev_output_operand->datas;
-            for (uint32_t b = 0; b < batch; ++b) {
-              sftensor prev_output_tensor = prev_runtime_op_tensors.at(b);
-              // 复用前序算子的内存指针，创建共享内存的新张量
-              sftensor output_tensor = std::make_shared<ftensor>(prev_output_tensor->raw_ptr(),
-                                                                 prev_output_tensor->shapes());
-              CheckAndReshapeTensor(output_tensor, operand_shapes);
-              output_tensors->datas[b] = output_tensor;
+          // 若当前算子的执行时间在前序算子生命周期结束之后，且元素总数一致，则可复用内存
+          if (runtime_op->start_time > prev_runtime_op->end_time) {
+            if (prev_runtime_op->output_operands->size() == operand_size) {
+              has_found = true;
+              const auto& prev_output_operand = prev_runtime_op->output_operands;
+              runtime_op->output_operands = std::make_shared<RuntimeOperand>(
+                  prev_output_operand->name + "_output", operand_shapes, batch,
+                  RuntimeDataType::kTypeFloat32);
+              const auto& prev_runtime_op_tensors = prev_output_operand->datas;
+              for (uint32_t b = 0; b < batch; ++b) {
+                sftensor prev_output_tensor = prev_runtime_op_tensors.at(b);
+                // 复用前序算子的内存指针，创建共享内存的新张量
+                sftensor output_tensor = std::make_shared<ftensor>(prev_output_tensor->raw_ptr(),
+                                                                   prev_output_tensor->shapes());
+                CheckAndReshapeTensor(output_tensor, operand_shapes);
+                output_tensors->datas[b] = output_tensor;
+              }
+              prev_runtime_op->occur_end_time = runtime_op->end_time;
             }
-            prev_runtime_op->occur_end_time = runtime_op->end_time;
           }
         }
       }

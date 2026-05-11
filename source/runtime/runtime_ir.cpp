@@ -13,6 +13,10 @@ namespace net_infer {
 RuntimeGraph::RuntimeGraph(std::string param_path, std::string bin_path)
     : param_path_(std::move(param_path)), bin_path_(std::move(bin_path)) {}
 
+void RuntimeGraph::set_enable_memory_reuse(bool enable) {
+  enable_memory_reuse_ = enable;
+}
+
 void RuntimeGraph::set_bin_path(const std::string& bin_path) { this->bin_path_ = bin_path; }
 
 void RuntimeGraph::set_param_path(const std::string& param_path) { this->param_path_ = param_path; }
@@ -124,7 +128,7 @@ void RuntimeGraph::Build() {
 
   // 初始化节点的输入和输出空间
   RuntimeOperatorUtils<float>::InitOperatorInput(operators_);
-  RuntimeOperatorUtils<float>::InitOperatorOutput(graph_->ops, operators_);
+  RuntimeOperatorUtils<float>::InitOperatorOutput(graph_->ops, operators_, enable_memory_reuse_);
 
   graph_state_ = GraphState::Complete;
   if (graph_ != nullptr) {

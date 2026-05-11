@@ -131,7 +131,8 @@ class RuntimeOperatorUtils<float> {
    * @param operators Vector of runtime operators
    */
   static void InitOperatorOutput(const std::vector<pnnx::Operator*>& pnnx_operators,
-                                 const std::vector<std::shared_ptr<RuntimeOperator>>& operators);
+                                 const std::vector<std::shared_ptr<RuntimeOperator>>& operators,
+                                 bool enable_memory_reuse = true);
 };
 
 }  // namespace net_infer

@@ -83,6 +83,18 @@ class RuntimeGraph {
   void Build();
 
   /**
+   * @brief Sets whether to enable output memory reuse between operators
+   *
+   * When enabled (default), the graph will try to reuse output tensors
+   * from previous operators to reduce memory allocations.
+   * Disable this for models with complex residual connections (e.g.
+   * MobilenetV2) where shared raw memory can cause use-after-free.
+   *
+   * @param enable true to enable memory reuse, false to disable
+   */
+  void set_enable_memory_reuse(bool enable);
+
+  /**
    * @brief Sets the path to the weights file
    *
    * @param bin_path Path to the weights file
@@ -255,6 +267,7 @@ class RuntimeGraph {
   std::vector<std::shared_ptr<RuntimeOperator>> input_ops_;
   std::vector<std::shared_ptr<RuntimeOperator>> output_ops_;
   std::vector<std::shared_ptr<RuntimeOperator>> operators_;
+  bool enable_memory_reuse_ = true;
 };
 
 }  // namespace net_infer
