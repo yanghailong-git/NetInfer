@@ -1,0 +1,162 @@
+根据 `mobilenet_v2.pnnx.param` 文件，这个模型是标准的 **MobileNetV2**（ImageNet 预训练），共包含 **102 个算子节点**。Conv + BN 已融合，激活函数均为 `ReLU6`。
+
+---
+
+## 完整网络结构
+
+```
+输入图像: (1, 3, 224, 224)
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ features.0 — 首层标准卷积                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Conv2d  3→32, 3×3, s=2, p=1            输出: (1, 32, 112, 112)               │
+│ ReLU6                                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Inverted Residual Blocks (Bottleneck)                                        │
+│ 结构: 1×1 expand → 3×3 depthwise → 1×1 project (+ ReLU6 / 残差add)           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│ features.1  (t=1, c=16, s=1, 无残差)                                         │
+│   Conv2d  32→32,  3×3, groups=32 (depthwise)  (1, 32, 112, 112)             │
+│   ReLU6                                                                      │
+│   Conv2d  32→16,  1×1 (project)               (1, 16, 112, 112)             │
+│                                                                              │
+│ features.2  (t=6, c=24, s=2, 无残差)                                         │
+│   Conv2d  16→96,  1×1 (expand)                (1, 96, 112, 112)             │
+│   ReLU6                                                                      │
+│   Conv2d  96→96,  3×3, groups=96, s=2 (dw)    (1, 96, 56, 56)               │
+│   ReLU6                                                                      │
+│   Conv2d  96→24,  1×1 (project)               (1, 24, 56, 56)               │
+│                                                                              │
+│ features.3  (t=6, c=24, s=1, 有残差)                                         │
+│   Conv2d  24→144, 1×1 (expand)                (1, 144, 56, 56)              │
+│   ReLU6                                                                      │
+│   Conv2d  144→144, 3×3, groups=144 (dw)       (1, 144, 56, 56)              │
+│   ReLU6                                                                      │
+│   Conv2d  144→24, 1×1 (project)               (1, 24, 56, 56)               │
+│   Expression(add): + features.2 的输出 (identity shortcut)                   │
+│                                                                              │
+│ features.4  (t=6, c=32, s=2, 无残差)                                         │
+│   Conv2d  24→144, 1×1 → ReLU6 → dw 3×3 s=2 → ReLU6 → project 144→32         │
+│                                               (1, 32, 28, 28)               │
+│                                                                              │
+│ features.5  (t=6, c=32, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 32, 28, 28)               │
+│                                                                              │
+│ features.6  (t=6, c=32, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 32, 28, 28)               │
+│                                                                              │
+│ features.7  (t=6, c=64, s=2, 无残差)                                         │
+│   expand 32→192 → dw 3×3 s=2 → project 192→64 (1, 64, 14, 14)               │
+│                                                                              │
+│ features.8  (t=6, c=64, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 64, 14, 14)               │
+│                                                                              │
+│ features.9  (t=6, c=64, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 64, 14, 14)               │
+│                                                                              │
+│ features.10 (t=6, c=64, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 64, 14, 14)               │
+│                                                                              │
+│ features.11 (t=6, c=96, s=1, 无残差)                                         │
+│   expand 64→384 → dw → project 384→96         (1, 96, 14, 14)               │
+│                                                                              │
+│ features.12 (t=6, c=96, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 96, 14, 14)               │
+│                                                                              │
+│ features.13 (t=6, c=96, s=1, 有残差)                                         │
+│   expand→dw→project + shortcut                (1, 96, 14, 14)               │
+│                                                                              │
+│ features.14 (t=6, c=160, s=2, 无残差)                                        │
+│   expand 96→576 → dw 3×3 s=2 → project 576→160 (1, 160, 7, 7)               │
+│                                                                              │
+│ features.15 (t=6, c=160, s=1, 有残差)                                        │
+│   expand→dw→project + shortcut                (1, 160, 7, 7)                │
+│                                                                              │
+│ features.16 (t=6, c=160, s=1, 有残差)                                        │
+│   expand→dw→project + shortcut                (1, 160, 7, 7)                │
+│                                                                              │
+│ features.17 (t=6, c=320, s=1, 无残差, 线性投影)                               │
+│   expand 160→960 → dw → project 960→320       (1, 320, 7, 7)                │
+│   ⚠️ project 后**无 ReLU6**（线性瓶颈，防止低维信息损失）                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 尾部卷积 + 全局池化 + 分类头                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ features.18                                                                  │
+│   Conv2d  320→1280, 1×1                     (1, 1280, 7, 7)                 │
+│   ReLU6                                                                      │
+│                                                                              │
+│ F.adaptive_avg_pool2d                                                        │
+│   output_size=(1,1)                         (1, 1280, 1, 1)                 │
+│                                                                              │
+│ torch.flatten                                                                │
+│   start_dim=1                               (1, 1280)                       │
+│                                                                              │
+│ classifier.1                                                                 │
+│   Linear  1280 → 1000                       (1, 1000)  ← logits             │
+└─────────────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+pnnx.Output  (pnnx_output_0)
+```
+
+---
+
+## 关键模块说明
+
+### 1. Inverted Residual Block（倒残差模块）
+
+MobileNetV2 的核心单元，和 ResNet 的残差块**相反**：
+
+| 对比 | ResNet BasicBlock | MobileNetV2 InvertedResidual |
+|------|------------------|------------------------------|
+| 结构 | 宽 → **窄** → 宽 | **窄** → 宽 → 窄 |
+| 卷积 | 3×3 → 3×3 | 1×1 expand → 3×3 dw → 1×1 project |
+| 激活 | ReLU 全程 | ReLU6 仅在 expand/dw，project 后无激活 |
+| 残差 | 始终有 | 仅当 `s=1` 且 `in_ch == out_ch` 时才有 |
+
+> `groups=in_channels` 的 `Conv2d` 就是 **Depthwise Separable Convolution** 的 depthwise 部分，计算量远小于标准卷积。
+
+### 2. 参数 `t` 的含义
+
+`t`（expansion factor）是扩展系数：
+- 首层 1×1 将通道从 `c_in` 扩展到 `t × c_in`
+- 3×3 depthwise 在扩展后的高维空间提取特征
+- 末层 1×1 将通道压缩回 `c_out`
+
+例如 features.2：`t=6`, `c=24`，输入 16 → expand 到 96 → depthwise → project 回 24。
+
+### 3. 线性瓶颈（Linear Bottleneck）
+
+features.17 的 project 卷积后**没有 ReLU6**：
+```cpp
+nn.Conv2d convbn2d_50 960→320, 1×1
+// 注意：这里直接连到下一个卷积，没有 ReLU6
+```
+
+原因：ReLU 会截断负数，在低维空间（320 通道）造成不可逆的信息损失。论文中提出在 project 层保留线性激活。
+
+---
+
+## 结构参数汇总
+
+| 项目 | 数值 |
+|------|------|
+| **模型** | MobileNetV2 |
+| **输入尺寸** | `(1, 3, 224, 224)` |
+| **总算子数** | 102 个 |
+| **首层** | Conv 3→32, s=2 |
+| **Bottleneck 总数** | 17 个 |
+| **扩展系数 t** | 6（除首层 bottleneck 为 1）|
+| **Depthwise 卷积数** | 17 个（均 `groups=in_channels`）|
+| **残差连接数** | 10 处（`Expression(add)`）|
+| **尾部** | Conv 320→1280 + AvgPool + Linear 1280→1000 |
+| **输出类别** | 1000 (ImageNet) |
